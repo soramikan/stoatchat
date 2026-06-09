@@ -22,6 +22,7 @@ use serde::Serialize;
 // region: payload
 
 #[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
 struct MessagePayload<'a> {
     aps: APS<'a>,
     #[serde(skip_serializing)]
@@ -31,12 +32,11 @@ struct MessagePayload<'a> {
 
     message: &'a Message,
     url: &'a str,
-    #[serde(rename = "camelCase")]
     author_avatar: &'a str,
-    #[serde(rename = "camelCase")]
     author_display_name: &'a str,
-    #[serde(rename = "camelCase")]
     channel_name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    server_id: Option<&'a str>,
 }
 
 impl<'a> PayloadLike for MessagePayload<'a> {
@@ -49,6 +49,7 @@ impl<'a> PayloadLike for MessagePayload<'a> {
 }
 
 #[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
 struct CallStartStopPayload<'a> {
     aps: APS<'a>,
     #[serde(skip_serializing)]
@@ -57,11 +58,8 @@ struct CallStartStopPayload<'a> {
     device_token: &'a str,
 
     initiator_id: &'a str,
-    #[serde(rename = "camelCase")]
     channel_id: &'a str,
-    #[serde(rename = "camelCase")]
     started_at: &'a str,
-    #[serde(rename = "camelCase")]
     ended: bool,
 }
 
@@ -174,13 +172,14 @@ impl Consumer for ApnsOutboundConsumer {
 
     async fn consume(&self, delivery: Delivery) -> Result<()> {
         let payload: PayloadToService = serde_json::from_slice(&delivery.data)?;
+        let config = revolt_config::config().await;
 
         let payload_options = NotificationOptions {
             apns_id: None,
             apns_push_type: Some(PushType::Alert),
             apns_expiration: None,
             apns_priority: Some(Priority::High),
-            apns_topic: Some("chat.revolt.app"),
+            apns_topic: Some(&config.pushd.apn.topic),
             apns_collapse_id: None,
         };
 
@@ -306,6 +305,10 @@ impl Consumer for ApnsOutboundConsumer {
 
             PayloadKind::MessageNotification(alert) => {
                 let title = self.format_title(&alert);
+                let server_id = match &alert.channel {
+                    Channel::TextChannel { server, .. } => Some(server.as_str()),
+                    _ => None,
+                };
                 let apn_payload = MessagePayload {
                     aps: APS {
                         alert: Some(APSAlert::Default(DefaultAlert {
@@ -323,7 +326,7 @@ impl Consumer for ApnsOutboundConsumer {
                         sound: Some(APSSound::Sound("default")),
                         thread_id: Some(alert.channel.id()),
                         content_available: None,
-                        category: None,
+                        category: Some("ALERT_MESSAGE"),
                         mutable_content: Some(1),
                         url_args: None,
                     },
@@ -334,6 +337,7 @@ impl Consumer for ApnsOutboundConsumer {
                     author_avatar: &alert.icon,
                     author_display_name: &alert.author,
                     channel_name: alert.channel.name().unwrap_or(&title),
+                    server_id,
                 };
 
                 debug!(

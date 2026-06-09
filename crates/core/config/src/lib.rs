@@ -193,6 +193,12 @@ pub struct PushApn {
     pub pkcs8: String,
     pub key_id: String,
     pub team_id: String,
+    #[serde(default = "default_apn_topic")]
+    pub topic: String,
+}
+
+fn default_apn_topic() -> String {
+    "dev.mikanbox.stoat".to_string()
 }
 
 #[derive(Deserialize, Debug, Clone)]
