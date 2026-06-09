@@ -4,6 +4,7 @@ use std::{
     sync::Arc,
 };
 
+use super::routing_key_for_subscription;
 use crate::utils::{render_notification_content, Consumer};
 use anyhow::Result;
 use async_trait::async_trait;
@@ -46,18 +47,12 @@ impl MassMessageConsumer {
                         extras: HashMap::new(),
                     };
 
-                    let routing_key = match sub.endpoint.as_str() {
-                        "apn" => &config.pushd.apn.queue,
-                        "fcm" => &config.pushd.fcm.queue,
-                        endpoint => {
-                            sendable.extras.insert("p256dh".to_string(), sub.p256dh);
-                            sendable
-                                .extras
-                                .insert("endpoint".to_string(), endpoint.to_string());
-
-                            &config.pushd.vapid.queue
-                        }
-                    };
+                    let routing_key = routing_key_for_subscription(
+                        sub.endpoint.as_str(),
+                        sub.p256dh,
+                        &mut sendable,
+                        &config,
+                    );
 
                     let payload = serde_json::to_string(&sendable)?;
 

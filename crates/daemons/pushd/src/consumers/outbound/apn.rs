@@ -174,12 +174,18 @@ impl Consumer for ApnsOutboundConsumer {
         let payload: PayloadToService = serde_json::from_slice(&delivery.data)?;
         let config = revolt_config::config().await;
 
+        let apns_topic = payload
+            .extras
+            .get("apn_topic")
+            .map(String::as_str)
+            .unwrap_or(&config.pushd.apn.topic);
+
         let payload_options = NotificationOptions {
             apns_id: None,
             apns_push_type: Some(PushType::Alert),
             apns_expiration: None,
             apns_priority: Some(Priority::High),
-            apns_topic: Some(&config.pushd.apn.topic),
+            apns_topic: Some(apns_topic),
             apns_collapse_id: None,
         };
 

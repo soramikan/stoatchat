@@ -134,6 +134,8 @@ sandbox = false
 queue = "notifications.outbound.apn"
 # APNs topic. This must match the iOS app bundle identifier that owns the push token.
 topic = "dev.mikanbox.stoat"
+# APNs topic for macOS desktop app tokens.
+desktop_topic = "chat.stoat.StoatDesktop"
 pkcs8 = ""
 key_id = ""
 team_id = ""

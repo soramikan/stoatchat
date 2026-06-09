@@ -68,6 +68,7 @@ production = true
 queue = "notifications.outbound.apn"
 sandbox = false
 topic = "dev.mikanbox.stoat"
+desktop_topic = "chat.stoat.StoatDesktop"
 pkcs8 = "<Apple の .p8 キーを base64 エンコードした文字列>"
 key_id = "<APNs Key ID>"
 team_id = "<Apple Developer Team ID>"
@@ -86,7 +87,7 @@ auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
 client_x509_cert_url = "<Firebase client_x509_cert_url>"
 ```
 
-APNs の `topic` は iOS アプリ本体の Bundle Identifier と一致させます。現在の iOS アプリは `dev.mikanbox.stoat`、通知サービス拡張は `dev.mikanbox.stoat.notifications` です。
+APNs の `topic` は iOS アプリ本体の Bundle Identifier と一致させます。現在の iOS アプリは `dev.mikanbox.stoat`、通知サービス拡張は `dev.mikanbox.stoat.notifications` です。macOS デスクトップ版は別 Bundle Identifier の token になるため、`desktop_topic` を `chat.stoat.StoatDesktop` に設定します。
 
 FCM は Firebase のサービスアカウント JSON の各項目を `[pushd.fcm]` に転記します。`auth_uri` が空の場合、`pushd` は FCM outbound consumer を起動しません。
 
@@ -258,6 +259,62 @@ corepack pnpm make
 
 既定の起動先は `https://chat.setoka.net` です。別サーバーへ向ける場合は起動時に `--force-server <URL>` を渡します。
 
+### macOS APNs プッシュ通知
+
+macOS 版は Electron の `pushNotifications.registerForAPNSNotifications()` で APNs device token を取得します。Web クライアントの通知設定で「Enable Push Notifications」を有効にすると、ログイン中のセッションへ以下の形式で登録します。
+
+```json
+{
+  "endpoint": "apn_desktop",
+  "p256dh": "",
+  "auth": "<macOS APNs device token>"
+}
+```
+
+`pushd` は `endpoint = "apn_desktop"` の購読を APNs outbound queue へ送り、APNs topic には `[pushd.apn].desktop_topic` を使います。iOS と同じ `.p8` APNs Auth Key を使えますが、Apple Developer の Identifiers では macOS アプリ用 App ID `chat.stoat.StoatDesktop` に Push Notifications capability を付けてください。
+
+### macOS 署名・Provisioning・Notarize
+
+APNs は未署名または ad hoc 署名の Electron 開発実行では動作しません。APNs token を取得するビルドは、Push Notifications capability を含む macOS provisioning profile と、`com.apple.developer.aps-environment` entitlement を含む署名が必要です。
+
+Apple Developer で用意するもの:
+
+- App ID: `chat.stoat.StoatDesktop`
+- Capability: Push Notifications
+- APNs Auth Key: サーバーの `pushd.apn.pkcs8`、`key_id`、`team_id` に設定
+- macOS provisioning profile: App ID `chat.stoat.StoatDesktop` と Push Notifications capability を含むもの
+- Developer ID Application 証明書、または配布方式に合う macOS signing identity
+
+Forge の macOS 署名は以下の環境変数で有効になります。
+
+```sh
+cd stoat-desktop
+export MACOS_APP_BUNDLE_ID="chat.stoat.StoatDesktop"
+export MACOS_CODESIGN_IDENTITY="Developer ID Application: <名前> (<Team ID>)"
+export MACOS_PROVISIONING_PROFILE="/path/to/StoatDesktop.provisionprofile"
+export APPLE_ID="<Apple ID>"
+export APPLE_APP_SPECIFIC_PASSWORD="<App-specific password>"
+export APPLE_TEAM_ID="<Apple Developer Team ID>"
+corepack pnpm make
+```
+
+`MACOS_CODESIGN_IDENTITY` または `MACOS_PROVISIONING_PROFILE` が設定されている場合、`stoat-desktop/build/entitlements.mac.plist` を使って署名します。Notarize 用の `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID` が揃っている場合は `@electron/notarize` も実行されます。
+
+署名結果の確認:
+
+```sh
+codesign -dvvv --entitlements :- "out/Stoat-darwin-arm64/Stoat.app"
+spctl -a -vv "out/Stoat-darwin-arm64/Stoat.app"
+security cms -D -i "out/Stoat-darwin-arm64/Stoat.app/Contents/embedded.provisionprofile" | plutil -p -
+```
+
+確認点:
+
+- `CFBundleIdentifier` が `chat.stoat.StoatDesktop`
+- entitlement に `com.apple.developer.aps-environment` が含まれる
+- provisioning profile の App ID と Team ID が署名 identity と一致する
+- `pushd.apn.desktop_topic` が `chat.stoat.StoatDesktop`
+
 ## 6. 確認手順
 
 ### サーバー
@@ -278,9 +335,17 @@ corepack pnpm make
 2. FCM token が取得され、`/push/subscribe` が成功することを確認します。
 3. バックグラウンド状態で DM または mention を受け取り、通知表示、タップ遷移、返信、既読アクションを確認します。
 
+### macOS Desktop
+
+1. 署名済み `.app` で通知権限を許可します。通常の `pnpm start` では APNs entitlement が無いため APNs token 検証はできません。
+2. 通知設定で「Enable Push Notifications」を有効化し、`endpoint = "apn_desktop"` と APNs token が `/push/subscribe` に登録されることを確認します。
+3. `pushd` から APNs へ送る payload の topic が `pushd.apn.desktop_topic` になっていることを確認します。
+4. アプリを閉じた状態で DM または mention を受け取り、macOS 通知表示と Dock badge を確認します。
+
 ## 7. よくある失敗
 
 - iOS に届かない: `pushd.apn.topic` と app bundle ID が一致していない、APNs key/team/key id が違う、sandbox/production が provisioning profile と合っていない。
+- macOS Desktop に届かない: `pushd.apn.desktop_topic` と `CFBundleIdentifier` が一致していない、`com.apple.developer.aps-environment` entitlement が署名に含まれていない、Push Notifications capability 入り provisioning profile が埋め込まれていない、未署名の `pnpm start` で検証している。
 - Android に届かない: `google-services.json` の package name が Gradle の `applicationId` と合っていない、Firebase service account を `pushd.fcm` に設定していない、端末に Google Play services がない。
 - 通知設定を有効にしても届かない: クライアントでログイン済みセッションの token を登録できていない。`POST /push/subscribe` のレスポンスとサーバー側セッションの `subscription` を確認する。
 - Web/Android/iOS で別サーバーへ向いている: 各クライアントの既定 URL または `.env` / `--force-server` /ビルド設定が `https://chat.setoka.net` になっているか確認する。

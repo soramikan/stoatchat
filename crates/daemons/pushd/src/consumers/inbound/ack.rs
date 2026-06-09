@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use super::{is_apn_endpoint, set_apn_topic_extra};
 use crate::utils::Consumer;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -65,11 +66,10 @@ impl Consumer for AckConsumer {
             let mut apple_sessions = sessions
                 .into_iter()
                 .filter(|session| {
-                    if let Some(sub) = &session.subscription {
-                        sub.endpoint == "apn"
-                    } else {
-                        false
-                    }
+                    session
+                        .subscription
+                        .as_ref()
+                        .is_some_and(|sub| is_apn_endpoint(&sub.endpoint))
                 })
                 .peekable();
 
@@ -89,13 +89,20 @@ impl Consumer for AckConsumer {
 
             // Step 4: loop through each apple session and send the badge update
             for session in apple_sessions {
-                let service_payload = PayloadToService {
+                let mut service_payload = PayloadToService {
                     notification: PayloadKind::BadgeUpdate(mention_count),
                     user_id: payload.user_id.clone(),
                     session_id: session.id.clone(),
                     token: session.subscription.as_ref().unwrap().auth.clone(),
                     extras: Default::default(),
                 };
+
+                set_apn_topic_extra(
+                    &session.subscription.as_ref().unwrap().endpoint,
+                    &mut service_payload,
+                    &config,
+                );
+
                 let payload = serde_json::to_string(&service_payload)?;
 
                 log::debug!(
