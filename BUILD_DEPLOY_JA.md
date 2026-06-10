@@ -257,6 +257,8 @@ corepack pnpm package
 corepack pnpm make
 ```
 
+macOS では `corepack pnpm package` が検証用の `.app` を生成し、`corepack pnpm make` が配布用の DMG インストーラーを `stoat-desktop/out/make/Stoat-<version>-<arch>.dmg` に生成します。macOS 配布は ZIP ではなく DMG を使います。
+
 既定の起動先は `https://chat.setoka.net` です。別サーバーへ向ける場合は起動時に `--force-server <URL>` を渡します。
 
 ### macOS APNs プッシュ通知
