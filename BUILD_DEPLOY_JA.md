@@ -259,6 +259,8 @@ corepack pnpm make
 
 macOS では `corepack pnpm package` が検証用の `.app` を生成し、`corepack pnpm make` が配布用の DMG インストーラーを `stoat-desktop/out/make/Stoat-<version>-<arch>.dmg` に生成します。macOS 配布は ZIP ではなく DMG を使います。
 
+Windows では Squirrel.Windows のインストーラーを生成します。Windows runner または Windows 環境で `corepack pnpm run make:windows` を実行すると、`stoat-desktop/out/make/squirrel.windows/x64/Stoat-Setup.exe`、`Stoat-Setup.msi`、`RELEASES`、`.nupkg` が生成されます。GitHub Actions の `Build Windows Installer` job も同じ成果物を artifact として保存します。
+
 既定の起動先は `https://chat.setoka.net` です。別サーバーへ向ける場合は起動時に `--force-server <URL>` を渡します。
 
 ### macOS APNs プッシュ通知
