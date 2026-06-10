@@ -101,6 +101,8 @@ pub struct GlobalLimits {
     /// max server channels
     server_channels: i64,
     body_limit_size: i64,
+    /// max size of one chunked upload request body
+    chunk_upload_size: i64,
 
     /// restrict server creation to these users.
     /// if blank, all users can create servers
@@ -241,6 +243,7 @@ pub async fn root() -> Result<Json<RevoltConfig>> {
                     server_roles: config.features.limits.global.server_roles as i64,
                     server_channels: config.features.limits.global.server_channels as i64,
                     body_limit_size: config.features.limits.global.body_limit_size as i64,
+                    chunk_upload_size: config.features.limits.global.chunk_upload_size as i64,
                     restrict_server_creation: config
                         .features
                         .limits

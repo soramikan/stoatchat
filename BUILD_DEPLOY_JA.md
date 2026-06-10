@@ -91,6 +91,19 @@ APNs の `topic` は iOS アプリ本体の Bundle Identifier と一致させま
 
 FCM は Firebase のサービスアカウント JSON の各項目を `[pushd.fcm]` に転記します。`auth_uri` が空の場合、`pushd` は FCM outbound consumer を起動しません。
 
+### ファイル分割アップロード設定
+
+Autumn は通常の `POST /{tag}` に加えて、CDN やリバースプロキシのリクエストサイズ制限を避けるための分割アップロード API を提供します。クライアントは API root の `features.limits.global.chunk_upload_size` を読み、未設定の場合は 50 MiB を既定値として使います。
+
+本番設定では `Revolt.overrides.toml` に必要に応じて以下を設定してください。
+
+```toml
+[features.limits.global]
+chunk_upload_size = 52_428_800
+```
+
+Autumn は受信したチャンクを OS の一時ディレクトリ配下 `stoat-autumn-chunks` に保存し、完了リクエストで結合、SHA-256 チェックサム検証、オブジェクトストレージへのアップロードを行います。Autumn を複数台で運用する場合は、同じ `upload_id` のチャンクと完了リクエストが同じ Autumn インスタンスへ届くようにロードバランサーでスティッキーセッションを設定するか、一時ディレクトリを共有ストレージにしてください。
+
 ## 2. iOS
 
 ### 必要な Apple 設定

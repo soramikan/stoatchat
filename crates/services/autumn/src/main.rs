@@ -41,6 +41,8 @@ async fn main() -> Result<(), std::io::Error> {
         paths(
             api::root,
             api::upload_file,
+            api::upload_chunk,
+            api::complete_chunk_upload,
             api::fetch_preview,
             api::fetch_file
         ),
@@ -51,7 +53,10 @@ async fn main() -> Result<(), std::io::Error> {
                 api::RootResponse,
                 api::Tag,
                 api::UploadPayload,
-                api::UploadResponse
+                api::UploadResponse,
+                api::UploadChunkPayload,
+                api::UploadChunkResponse,
+                api::CompleteUploadPayload
             )
         ),
         tags(

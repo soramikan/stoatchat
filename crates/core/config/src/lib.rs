@@ -370,8 +370,14 @@ pub struct GlobalLimits {
     pub new_user_hours: usize,
 
     pub body_limit_size: usize,
+    #[serde(default = "default_chunk_upload_size")]
+    pub chunk_upload_size: usize,
 
     pub restrict_server_creation: Vec<String>,
+}
+
+fn default_chunk_upload_size() -> usize {
+    50 * 1024 * 1024
 }
 
 #[derive(Deserialize, Debug, Clone)]

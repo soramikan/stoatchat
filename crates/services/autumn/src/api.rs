@@ -1,5 +1,7 @@
 use std::{
-    io::{Cursor, Read, Write},
+    fs::{self, File},
+    io::{Cursor, Read, Seek, SeekFrom, Write},
+    path::PathBuf,
     time::Duration,
 };
 
@@ -26,6 +28,7 @@ use tokio::time::Instant;
 use tower_http::cors::{AllowHeaders, Any, CorsLayer};
 use url_escape::encode_component;
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 use crate::{
     exif::strip_metadata, metadata::generate_metadata, mime_type::determine_mime_type, AppState,
@@ -55,6 +58,18 @@ pub async fn router() -> Router<AppState> {
                 .layer(DefaultBodyLimit::max(
                     config.features.limits.global.body_limit_size,
                 )),
+        )
+        .route(
+            "/:tag/chunks",
+            post(upload_chunk)
+                .options(options)
+                .layer(DefaultBodyLimit::max(
+                    config.features.limits.global.chunk_upload_size + 1_000_000,
+                )),
+        )
+        .route(
+            "/:tag/chunks/:upload_id/complete",
+            post(complete_chunk_upload).options(options),
         )
         .route("/:tag/:file_id", get(fetch_preview))
         .route("/:tag/:file_id/:file_name", get(fetch_file))
@@ -145,6 +160,79 @@ pub struct UploadPayload {
 pub struct UploadResponse {
     /// ID to attach uploaded file to object
     id: String,
+}
+
+/// Request body for one chunk upload.
+#[derive(ToSchema, TryFromMultipart)]
+pub struct UploadChunkPayload {
+    /// Client-generated UUID for this upload.
+    upload_id: String,
+    /// Zero-based chunk index.
+    chunk_index: usize,
+    /// Total number of chunks for the original file.
+    total_chunks: usize,
+    /// Total size of the original file in bytes.
+    total_size: usize,
+    /// Chunk data.
+    #[schema(format = Binary)]
+    #[allow(dead_code)]
+    #[form_data(limit = "unlimited")]
+    chunk: FieldData<NamedTempFile>,
+}
+
+/// Successful chunk upload response.
+#[derive(Serialize, Debug, ToSchema)]
+pub struct UploadChunkResponse {
+    upload_id: String,
+    chunk_index: usize,
+    received_chunks: usize,
+    total_chunks: usize,
+}
+
+/// Request body for completing a chunked upload.
+#[derive(Deserialize, Debug, ToSchema)]
+pub struct CompleteUploadPayload {
+    /// Original filename.
+    filename: String,
+    /// Total number of chunks for the original file.
+    total_chunks: usize,
+    /// Total size of the original file in bytes.
+    total_size: usize,
+    /// Lowercase or uppercase hex SHA-256 of the original file.
+    sha256: String,
+}
+
+fn chunk_upload_dir(user: &User, upload_id: &str) -> Result<PathBuf> {
+    let upload_id = Uuid::parse_str(upload_id)
+        .map_err(|_| {
+            create_error!(FailedValidation {
+                error: "Invalid upload UUID".to_string()
+            })
+        })?
+        .to_string();
+
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(user.id.as_bytes());
+    let user_dir = format!("{:02x}", hasher.finalize());
+
+    Ok(std::env::temp_dir()
+        .join("stoat-autumn-chunks")
+        .join(user_dir)
+        .join(upload_id))
+}
+
+fn validate_chunk_metadata(
+    chunk_index: usize,
+    total_chunks: usize,
+    total_size: usize,
+) -> Result<()> {
+    if total_chunks == 0 || chunk_index >= total_chunks || total_size == 0 {
+        return Err(create_error!(FailedValidation {
+            error: "Invalid chunk metadata".to_string()
+        }));
+    }
+
+    Ok(())
 }
 
 /// Upload a file
@@ -330,6 +418,308 @@ async fn upload_file(
         .await?;
 
     Ok(Json(UploadResponse { id }))
+}
+
+async fn persist_named_temp_file(
+    db: &Database,
+    user: &User,
+    tag: Tag,
+    mut file: NamedTempFile,
+    filename: String,
+) -> Result<Json<UploadResponse>> {
+    let config = config().await;
+    let now = Instant::now();
+
+    let mut buf = Vec::<u8>::new();
+    file.seek(SeekFrom::Start(0)).to_internal_error()?;
+    report_internal_error!(file.read_to_end(&mut buf))?;
+
+    let original_file_size = buf.len();
+
+    if original_file_size < config.files.limit.min_file_size {
+        return Err(create_error!(FileTooSmall));
+    }
+
+    let limits = user.limits().await;
+    let size_limit = *limits
+        .file_upload_size_limit
+        .get(tag.clone().into())
+        .expect("size limit");
+
+    if original_file_size > size_limit {
+        return Err(create_error!(FileTooLarge { max: size_limit }));
+    }
+
+    let original_hash = {
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(&buf);
+        hasher.finalize()
+    };
+
+    let id = if matches!(tag, Tag::emojis) {
+        ulid::Ulid::new().to_string()
+    } else {
+        nanoid::nanoid!(42)
+    };
+
+    let mime_type = determine_mime_type(&mut file, &buf, &filename);
+
+    if config
+        .files
+        .blocked_mime_types
+        .iter()
+        .any(|m| m == mime_type)
+    {
+        return Err(create_error!(FileTypeNotAllowed));
+    }
+
+    let metadata = generate_metadata(&file, mime_type);
+
+    if !matches!(tag, Tag::attachments) && !matches!(metadata, Metadata::Image { .. }) {
+        return Err(create_error!(FileTypeNotAllowed));
+    }
+
+    let file_hash_exists = if let Ok(file_hash) = db
+        .fetch_attachment_hash(&format!("{original_hash:02x}"))
+        .await
+    {
+        if !file_hash.iv.is_empty() {
+            let tag: &'static str = tag.into();
+            db.insert_attachment(&file_hash.into_file(
+                id.clone(),
+                tag.to_owned(),
+                filename,
+                user.id.clone(),
+            ))
+            .await?;
+
+            return Ok(Json(UploadResponse { id }));
+        }
+
+        true
+    } else {
+        false
+    };
+
+    let (buf, metadata) = strip_metadata(file, buf, metadata, mime_type).await?;
+
+    if matches!(metadata, Metadata::File)
+        && (config.files.scan_mime_types.is_empty()
+            || config.files.scan_mime_types.iter().any(|v| v == mime_type))
+        && crate::clamav::is_malware(&buf).await?
+    {
+        return Err(create_error!(InternalError));
+    }
+
+    let new_file_size = buf.len() + AUTHENTICATION_TAG_SIZE_BYTES;
+    let processed_hash = {
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(&buf);
+        hasher.finalize()
+    };
+    let process_ratio = new_file_size as f32 / original_file_size as f32;
+    let time_to_process = Instant::now() - now;
+
+    tracing::info!("Received chunked file {filename}\nOriginal hash: {original_hash:02x}\nOriginal size: {original_file_size} bytes\nMime type: {mime_type}\nMetadata: {metadata:?}\nProcessed file size: {new_file_size} bytes ({:.2}%).\nProcessed hash: {processed_hash:02x}\nProcessing took {time_to_process:?}", process_ratio * 100.0);
+
+    let file_hash = FileHash {
+        id: format!("{original_hash:02x}"),
+        processed_hash: format!("{processed_hash:02x}"),
+
+        created_at: Timestamp::now_utc(),
+
+        bucket_id: config.files.s3.default_bucket,
+        path: format!("{original_hash:02x}"),
+        iv: String::new(),
+
+        metadata,
+        content_type: mime_type.to_owned(),
+        size: new_file_size as isize,
+    };
+
+    if !file_hash_exists {
+        db.insert_attachment_hash(&file_hash).await?;
+    }
+
+    let upload_start = Instant::now();
+    let nonce = upload_to_s3(&file_hash.bucket_id, &file_hash.id, &buf).await?;
+    db.set_attachment_hash_nonce(&file_hash.id, &nonce).await?;
+
+    let time_to_upload = Instant::now() - upload_start;
+    tracing::info!("Took {time_to_upload:?} to upload {new_file_size} bytes to S3.");
+
+    let tag: &'static str = tag.into();
+    db.insert_attachment(&file_hash.into_file(
+        id.clone(),
+        tag.to_owned(),
+        filename,
+        user.id.clone(),
+    ))
+    .await?;
+
+    Ok(Json(UploadResponse { id }))
+}
+
+/// Upload one file chunk.
+#[utoipa::path(
+    post,
+    path = "/{tag}/chunks",
+    responses(
+        (status = 200, description = "Chunk was accepted", body = UploadChunkResponse)
+    ),
+    params(
+        ("tag" = Tag, Path, description = "Tag to upload to (e.g. attachments, icons, ...)")
+    ),
+    request_body(content_type = "multipart/form-data", content = UploadChunkPayload),
+    security(
+        ("session_token" = []),
+        ("bot_token" = [])
+    )
+)]
+async fn upload_chunk(
+    user: User,
+    Path(tag): Path<Tag>,
+    TypedMultipart(UploadChunkPayload {
+        upload_id,
+        chunk_index,
+        total_chunks,
+        total_size,
+        chunk,
+    }): TypedMultipart<UploadChunkPayload>,
+) -> Result<Json<UploadChunkResponse>> {
+    let config = config().await;
+    validate_chunk_metadata(chunk_index, total_chunks, total_size)?;
+
+    let limits = user.limits().await;
+    let size_limit = *limits
+        .file_upload_size_limit
+        .get(tag.into())
+        .expect("size limit");
+
+    if total_size > size_limit {
+        return Err(create_error!(FileTooLarge { max: size_limit }));
+    }
+
+    let chunk_size = chunk
+        .contents
+        .as_file()
+        .metadata()
+        .to_internal_error()?
+        .len() as usize;
+    if chunk_size == 0 || chunk_size > config.features.limits.global.chunk_upload_size {
+        return Err(create_error!(FileTooLarge {
+            max: config.features.limits.global.chunk_upload_size
+        }));
+    }
+
+    let upload_dir = chunk_upload_dir(&user, &upload_id)?;
+    fs::create_dir_all(&upload_dir).to_internal_error()?;
+
+    let target = upload_dir.join(format!("{chunk_index:08}.part"));
+    fs::copy(chunk.contents.path(), &target).to_internal_error()?;
+
+    let received_chunks = fs::read_dir(&upload_dir)
+        .to_internal_error()?
+        .filter_map(std::result::Result::ok)
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "part")
+        })
+        .count();
+
+    Ok(Json(UploadChunkResponse {
+        upload_id,
+        chunk_index,
+        received_chunks,
+        total_chunks,
+    }))
+}
+
+/// Complete a chunked upload, verify checksum, and persist the combined file.
+#[utoipa::path(
+    post,
+    path = "/{tag}/chunks/{upload_id}/complete",
+    responses(
+        (status = 200, description = "Upload was completed", body = UploadResponse)
+    ),
+    params(
+        ("tag" = Tag, Path, description = "Tag to upload to (e.g. attachments, icons, ...)"),
+        ("upload_id" = String, Path, description = "Client-generated upload UUID")
+    ),
+    request_body(content = CompleteUploadPayload),
+    security(
+        ("session_token" = []),
+        ("bot_token" = [])
+    )
+)]
+async fn complete_chunk_upload(
+    State(db): State<Database>,
+    user: User,
+    Path((tag, upload_id)): Path<(Tag, String)>,
+    Json(payload): Json<CompleteUploadPayload>,
+) -> Result<Json<UploadResponse>> {
+    validate_chunk_metadata(0, payload.total_chunks, payload.total_size)?;
+
+    if payload.sha256.len() != 64 || !payload.sha256.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(create_error!(FailedValidation {
+            error: "Invalid checksum".to_string()
+        }));
+    }
+
+    let upload_dir = chunk_upload_dir(&user, &upload_id)?;
+    let mut combined = NamedTempFile::new().to_internal_error()?;
+    let mut hasher = sha2::Sha256::new();
+    let mut combined_size = 0usize;
+
+    for chunk_index in 0..payload.total_chunks {
+        let chunk_path = upload_dir.join(format!("{chunk_index:08}.part"));
+        if !chunk_path.exists() {
+            return Err(create_error!(FailedValidation {
+                error: format!("Missing chunk {chunk_index}")
+            }));
+        }
+
+        let mut chunk_file = File::open(&chunk_path).to_internal_error()?;
+        let mut buffer = [0u8; 64 * 1024];
+
+        loop {
+            let read = chunk_file.read(&mut buffer).to_internal_error()?;
+            if read == 0 {
+                break;
+            }
+
+            hasher.update(&buffer[..read]);
+            combined.write_all(&buffer[..read]).to_internal_error()?;
+            combined_size += read;
+        }
+    }
+
+    combined.flush().to_internal_error()?;
+
+    if combined_size != payload.total_size {
+        return Err(create_error!(FailedValidation {
+            error: "Combined file size mismatch".to_string()
+        }));
+    }
+
+    let checksum = format!("{:02x}", hasher.finalize());
+    if checksum != payload.sha256.to_ascii_lowercase() {
+        return Err(create_error!(FailedValidation {
+            error: "Checksum mismatch".to_string()
+        }));
+    }
+
+    let response = persist_named_temp_file(&db, &user, tag, combined, payload.filename).await;
+
+    if response.is_ok() {
+        if let Err(err) = fs::remove_dir_all(&upload_dir) {
+            tracing::warn!("Failed to remove completed chunk upload {upload_id}: {err:?}");
+        }
+    }
+
+    response
 }
 
 /// Header value used for cache control
