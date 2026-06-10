@@ -204,7 +204,7 @@ fn default_apn_topic() -> String {
 }
 
 fn default_apn_desktop_topic() -> String {
-    "chat.stoat.StoatDesktop".to_string()
+    "dev.mikanbox.stoat.desktop".to_string()
 }
 
 #[derive(Deserialize, Debug, Clone)]

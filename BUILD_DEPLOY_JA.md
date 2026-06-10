@@ -68,7 +68,7 @@ production = true
 queue = "notifications.outbound.apn"
 sandbox = false
 topic = "dev.mikanbox.stoat"
-desktop_topic = "chat.stoat.StoatDesktop"
+desktop_topic = "dev.mikanbox.stoat.desktop"
 pkcs8 = "<Apple の .p8 キーを base64 エンコードした文字列>"
 key_id = "<APNs Key ID>"
 team_id = "<Apple Developer Team ID>"
@@ -87,7 +87,7 @@ auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
 client_x509_cert_url = "<Firebase client_x509_cert_url>"
 ```
 
-APNs の `topic` は iOS アプリ本体の Bundle Identifier と一致させます。現在の iOS アプリは `dev.mikanbox.stoat`、通知サービス拡張は `dev.mikanbox.stoat.notifications` です。macOS デスクトップ版は別 Bundle Identifier の token になるため、`desktop_topic` を `chat.stoat.StoatDesktop` に設定します。
+APNs の `topic` は iOS アプリ本体の Bundle Identifier と一致させます。現在の iOS アプリは `dev.mikanbox.stoat`、通知サービス拡張は `dev.mikanbox.stoat.notifications` です。macOS デスクトップ版は別 Bundle Identifier の token になるため、`desktop_topic` を `dev.mikanbox.stoat.desktop` に設定します。
 
 FCM は Firebase のサービスアカウント JSON の各項目を `[pushd.fcm]` に転記します。`auth_uri` が空の場合、`pushd` は FCM outbound consumer を起動しません。
 
@@ -271,7 +271,7 @@ macOS 版は Electron の `pushNotifications.registerForAPNSNotifications()` で
 }
 ```
 
-`pushd` は `endpoint = "apn_desktop"` の購読を APNs outbound queue へ送り、APNs topic には `[pushd.apn].desktop_topic` を使います。iOS と同じ `.p8` APNs Auth Key を使えますが、Apple Developer の Identifiers では macOS アプリ用 App ID `chat.stoat.StoatDesktop` に Push Notifications capability を付けてください。
+`pushd` は `endpoint = "apn_desktop"` の購読を APNs outbound queue へ送り、APNs topic には `[pushd.apn].desktop_topic` を使います。iOS と同じ `.p8` APNs Auth Key を使えますが、Apple Developer の Identifiers では macOS アプリ用 App ID `dev.mikanbox.stoat.desktop` に Push Notifications capability を付けてください。
 
 ### macOS 署名・Provisioning・Notarize
 
@@ -279,19 +279,21 @@ APNs は未署名または ad hoc 署名の Electron 開発実行では動作し
 
 Apple Developer で用意するもの:
 
-- App ID: `chat.stoat.StoatDesktop`
+- App ID: `dev.mikanbox.stoat.desktop`。APNs の topic と一致させるため、Wildcard ではなく Explicit App ID として作成します。
 - Capability: Push Notifications
+- Capability: App Sandbox を使う配布形態の場合は、ネットワーククライアント、カメラ、マイクなど `stoat-desktop/build/entitlements.mac.plist` にある利用機能と一致させる
 - APNs Auth Key: サーバーの `pushd.apn.pkcs8`、`key_id`、`team_id` に設定
-- macOS provisioning profile: App ID `chat.stoat.StoatDesktop` と Push Notifications capability を含むもの
+- macOS provisioning profile: App ID `dev.mikanbox.stoat.desktop` と Push Notifications capability を含むもの。Capability を変更した後は再生成します。
 - Developer ID Application 証明書、または配布方式に合う macOS signing identity
+- Notarization 用の Apple ID、App 用パスワード、Team ID
 
 Forge の macOS 署名は以下の環境変数で有効になります。
 
 ```sh
 cd stoat-desktop
-export MACOS_APP_BUNDLE_ID="chat.stoat.StoatDesktop"
+export MACOS_APP_BUNDLE_ID="dev.mikanbox.stoat.desktop"
 export MACOS_CODESIGN_IDENTITY="Developer ID Application: <名前> (<Team ID>)"
-export MACOS_PROVISIONING_PROFILE="/path/to/StoatDesktop.provisionprofile"
+export MACOS_PROVISIONING_PROFILE="/path/to/dev.mikanbox.stoat.desktop.provisionprofile"
 export APPLE_ID="<Apple ID>"
 export APPLE_APP_SPECIFIC_PASSWORD="<App-specific password>"
 export APPLE_TEAM_ID="<Apple Developer Team ID>"
@@ -310,10 +312,10 @@ security cms -D -i "out/Stoat-darwin-arm64/Stoat.app/Contents/embedded.provision
 
 確認点:
 
-- `CFBundleIdentifier` が `chat.stoat.StoatDesktop`
+- `CFBundleIdentifier` が `dev.mikanbox.stoat.desktop`
 - entitlement に `com.apple.developer.aps-environment` が含まれる
 - provisioning profile の App ID と Team ID が署名 identity と一致する
-- `pushd.apn.desktop_topic` が `chat.stoat.StoatDesktop`
+- `pushd.apn.desktop_topic` が `dev.mikanbox.stoat.desktop`
 
 ## 6. 確認手順
 
