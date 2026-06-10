@@ -312,6 +312,7 @@ APPLE_TEAM_ID=<Apple Developer Team ID>
 署名結果の確認:
 
 ```sh
+security find-identity -p codesigning -v
 codesign -dvvv --entitlements :- "out/Stoat-darwin-arm64/Stoat.app"
 spctl -a -vv "out/Stoat-darwin-arm64/Stoat.app"
 security cms -D -i "out/Stoat-darwin-arm64/Stoat.app/Contents/embedded.provisionprofile" | plutil -p -
@@ -323,6 +324,8 @@ security cms -D -i "out/Stoat-darwin-arm64/Stoat.app/Contents/embedded.provision
 - entitlement に `com.apple.developer.aps-environment` が含まれる
 - provisioning profile の App ID と Team ID が署名 identity と一致する
 - `pushd.apn.desktop_topic` が `dev.mikanbox.stoat.desktop`
+
+`security find-identity -p codesigning -v` に `Developer ID Application: Mikanbox (P3V2JS8K3N)` が出ない場合、notarize できる署名ではありません。証明書をインストールしてから再実行してください。`spctl` が `Unnotarized Developer ID` で reject する場合は署名はできており、notarize 前であることを示します。
 
 ## 6. 確認手順
 
