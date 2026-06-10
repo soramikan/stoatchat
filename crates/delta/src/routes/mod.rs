@@ -1,9 +1,12 @@
 use revolt_config::Settings;
+use revolt_database::{Channel, Database};
+use revolt_result::{create_error, Result};
 use revolt_rocket_okapi::{revolt_okapi::openapi3::OpenApi, settings::OpenApiSettings};
 pub use rocket::http::Status;
 pub use rocket::response::Redirect;
 use rocket::{Build, Rocket};
 
+mod admin;
 mod bots;
 mod channels;
 mod customisation;
@@ -18,6 +21,30 @@ mod sync;
 mod users;
 mod webhooks;
 
+pub(crate) async fn require_server_not_frozen(db: &Database, server_id: &str) -> Result<()> {
+    if db
+        .fetch_admin_settings()
+        .await?
+        .unwrap_or_default()
+        .server_is_frozen(server_id)
+    {
+        return Err(create_error!(InvalidOperation));
+    }
+
+    Ok(())
+}
+
+pub(crate) async fn require_channel_server_not_frozen(
+    db: &Database,
+    channel: &Channel,
+) -> Result<()> {
+    if let Some(server_id) = channel.server() {
+        require_server_not_frozen(db, server_id).await?;
+    }
+
+    Ok(())
+}
+
 pub fn mount(config: Settings, mut rocket: Rocket<Build>) -> Rocket<Build> {
     let settings = OpenApiSettings::default();
 
@@ -25,6 +52,7 @@ pub fn mount(config: Settings, mut rocket: Rocket<Build>) -> Rocket<Build> {
         mount_endpoints_and_merged_docs! {
             rocket, "/".to_owned(), settings,
             "/" => (vec![], custom_openapi_spec()),
+            "/admin" => admin::routes(),
             "" => openapi_get_routes_spec![root::root],
             "/users" => users::routes(),
             "/bots" => bots::routes(),
@@ -46,6 +74,7 @@ pub fn mount(config: Settings, mut rocket: Rocket<Build>) -> Rocket<Build> {
         mount_endpoints_and_merged_docs! {
             rocket, "/".to_owned(), settings,
             "/" => (vec![], custom_openapi_spec()),
+            "/admin" => admin::routes(),
             "" => openapi_get_routes_spec![root::root],
             "/users" => users::routes(),
             "/bots" => bots::routes(),

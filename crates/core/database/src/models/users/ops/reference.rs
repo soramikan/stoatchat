@@ -60,6 +60,19 @@ impl AbstractUsers for ReferenceDb {
             .collect()
     }
 
+    /// Fetch all users.
+    async fn fetch_all_users(&self) -> Result<Vec<User>> {
+        let users = self.users.lock().await;
+        let mut users = users.values().cloned().collect::<Vec<_>>();
+        users.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(users)
+    }
+
+    /// Fetch the first created user.
+    async fn fetch_first_user(&self) -> Result<Option<User>> {
+        Ok(self.fetch_all_users().await?.into_iter().next())
+    }
+
     /// Fetch all discriminators in use for a username
     async fn fetch_discriminators_in_use(&self, username: &str) -> Result<Vec<String>> {
         let users = self.users.lock().await;

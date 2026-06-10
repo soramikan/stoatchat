@@ -1,3 +1,4 @@
+use crate::routes::require_server_not_frozen;
 use revolt_database::util::permissions::DatabasePermissionQuery;
 use revolt_database::{util::reference::Reference, Channel, Database, User};
 use revolt_models::v0;
@@ -27,6 +28,8 @@ pub async fn create_server_channel(
     })?;
 
     let mut server = server.as_server(db).await?;
+    require_server_not_frozen(db, &server.id).await?;
+
     let mut query = DatabasePermissionQuery::new(db, &user).server(&server);
     calculate_server_permissions(&mut query)
         .await

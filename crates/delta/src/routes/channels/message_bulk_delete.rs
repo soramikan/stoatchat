@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::routes::require_channel_server_not_frozen;
 use revolt_database::{
     util::{permissions::DatabasePermissionQuery, reference::Reference},
     Database, Message, User,
@@ -39,13 +40,16 @@ pub async fn bulk_delete_messages(
             .datetime()
             .elapsed()
             .expect("Time went backwards")
-            > Duration::from_hours(7 * 24)  // 7 days
+            > Duration::from_hours(7 * 24)
+        // 7 days
         {
             return Err(create_error!(InvalidOperation));
         }
     }
 
     let channel = target.as_channel(db).await?;
+    require_channel_server_not_frozen(db, &channel).await?;
+
     let mut query = DatabasePermissionQuery::new(db, &user).channel(&channel);
     calculate_channel_permissions(&mut query)
         .await

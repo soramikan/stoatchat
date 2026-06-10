@@ -1,3 +1,4 @@
+use crate::routes::require_channel_server_not_frozen;
 use revolt_database::{
     util::{permissions::DatabasePermissionQuery, reference::Reference},
     Database, User,
@@ -18,10 +19,12 @@ pub async fn delete(
     target: Reference<'_>,
     msg: Reference<'_>,
 ) -> Result<EmptyResponse> {
-    let message = msg.as_message_in_channel(db, target.id).await?;
+    let channel = target.as_channel(db).await?;
+    require_channel_server_not_frozen(db, &channel).await?;
+
+    let message = msg.as_message_in_channel(db, channel.id()).await?;
 
     if message.author != user.id {
-        let channel = target.as_channel(db).await?;
         let mut query = DatabasePermissionQuery::new(db, &user).channel(&channel);
         calculate_channel_permissions(&mut query)
             .await

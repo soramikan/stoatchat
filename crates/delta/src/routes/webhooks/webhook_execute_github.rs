@@ -1,3 +1,4 @@
+use crate::routes::require_channel_server_not_frozen;
 use revolt_database::{util::reference::Reference, Database, Message, AMQP};
 use revolt_models::v0::{MessageAuthor, SendableEmbed, Webhook};
 use revolt_result::{create_error, Error, Result};
@@ -772,6 +773,8 @@ pub async fn webhook_execute_github(
     webhook.assert_token(token)?;
 
     let channel = db.fetch_channel(&webhook.channel_id).await?;
+    require_channel_server_not_frozen(db, &channel).await?;
+
     let event = convert_event(&data, &event)?;
 
     let sendable_embed = match event.event {

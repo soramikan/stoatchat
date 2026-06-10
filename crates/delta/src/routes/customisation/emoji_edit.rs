@@ -1,3 +1,4 @@
+use crate::routes::require_server_not_frozen;
 use revolt_database::{
     util::{permissions::DatabasePermissionQuery, reference::Reference},
     Database, EmojiParent, PartialEmoji, User,
@@ -31,6 +32,7 @@ pub async fn edit_emoji(
     match &emoji.parent {
         EmojiParent::Server { id } => {
             let server = db.fetch_server(id.as_str()).await?;
+            require_server_not_frozen(db, &server.id).await?;
 
             let mut query = DatabasePermissionQuery::new(db, &user).server(&server);
             calculate_server_permissions(&mut query)

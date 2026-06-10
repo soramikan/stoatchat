@@ -23,18 +23,26 @@ pub async fn create_server(
 
     let config = config().await;
 
-    if !config
+    let settings = db.fetch_admin_settings().await?.unwrap_or_default();
+    let config_restricts_creation = !config
         .features
         .limits
         .global
         .restrict_server_creation
-        .is_empty()
-        && !config
-            .features
-            .limits
-            .global
-            .restrict_server_creation
-            .contains(&user.id)
+        .is_empty();
+    let admin_restricts_creation = settings.server_creation.restricted;
+    let user_can_create_by_config = config
+        .features
+        .limits
+        .global
+        .restrict_server_creation
+        .contains(&user.id);
+    let user_can_create_by_admin =
+        user.is_default_admin(db).await? || settings.can_create_server(&user.id);
+
+    if (config_restricts_creation || admin_restricts_creation)
+        && !user_can_create_by_config
+        && !user_can_create_by_admin
     {
         return Err(create_error!(CantCreateServers));
     }

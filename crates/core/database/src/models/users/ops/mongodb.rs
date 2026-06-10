@@ -80,6 +80,38 @@ impl AbstractUsers for MongoDb {
             .await)
     }
 
+    /// Fetch all users.
+    async fn fetch_all_users(&self) -> Result<Vec<User>> {
+        Ok(self
+            .col::<User>(COL)
+            .find(doc! {})
+            .with_options(FindOptions::builder().sort(doc! { "_id": 1_i32 }).build())
+            .await
+            .map_err(|_| create_database_error!("find", COL))?
+            .filter_map(|s| async {
+                if cfg!(debug_assertions) {
+                    Some(s.unwrap())
+                } else {
+                    s.ok()
+                }
+            })
+            .collect()
+            .await)
+    }
+
+    /// Fetch the first created user.
+    async fn fetch_first_user(&self) -> Result<Option<User>> {
+        self.col::<User>(COL)
+            .find_one(doc! {})
+            .with_options(
+                FindOneOptions::builder()
+                    .sort(doc! { "_id": 1_i32 })
+                    .build(),
+            )
+            .await
+            .map_err(|_| create_database_error!("find_one", COL))
+    }
+
     /// Fetch all discriminators in use for a username
     async fn fetch_discriminators_in_use(&self, username: &str) -> Result<Vec<String>> {
         #[derive(Deserialize)]

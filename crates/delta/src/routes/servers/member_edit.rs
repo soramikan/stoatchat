@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use crate::routes::require_server_not_frozen;
 use revolt_database::{
     events::client::EventV1,
     util::{
@@ -15,7 +16,9 @@ use revolt_database::{
 };
 use revolt_models::v0::{self, FieldsMember};
 
-use revolt_permissions::{calculate_channel_permissions, calculate_server_permissions, ChannelPermission, UserPermission};
+use revolt_permissions::{
+    calculate_channel_permissions, calculate_server_permissions, ChannelPermission, UserPermission,
+};
 use revolt_result::{create_error, Result};
 use rocket::{form::validate::Contains, serde::json::Json, State};
 use validator::Validate;
@@ -42,6 +45,8 @@ pub async fn edit(
 
     // Fetch server and member
     let mut server = server_id.as_server(db).await?;
+    require_server_not_frozen(db, &server.id).await?;
+
     let target_user = member_id.as_user(db).await?;
     let mut member = member_id.as_member(db, &server.id).await?;
 
@@ -70,7 +75,7 @@ pub async fn edit(
         } else if data.remove.contains(&v0::FieldsMember::Avatar) {
             permissions.throw_if_lacking_channel_permission(ChannelPermission::RemoveAvatars)?;
         } else {
-            return Err(create_error!(InvalidOperation))
+            return Err(create_error!(InvalidOperation));
         }
     }
 
@@ -126,7 +131,8 @@ pub async fn edit(
             Err(create_error!(UnknownChannel))?
         }
 
-        let channel_permissions = calculate_channel_permissions(&mut query.clone().channel(&channel)).await;
+        let channel_permissions =
+            calculate_channel_permissions(&mut query.clone().channel(&channel)).await;
         channel_permissions.throw_if_lacking_channel_permission(ChannelPermission::Connect)?;
 
         if get_user_voice_channel_in_server(&target_user.id, &server.id)
@@ -203,7 +209,11 @@ pub async fn edit(
     }
 
     member
-        .update(db, partial, remove.clone().into_iter().map(Into::into).collect())
+        .update(
+            db,
+            partial,
+            remove.clone().into_iter().map(Into::into).collect(),
+        )
         .await?;
 
     if let Some(new_voice_channel) = new_voice_channel {
@@ -256,7 +266,11 @@ pub async fn edit(
             .private(target_user.id.clone())
             .await;
         };
-    } else if can_publish.is_some() || can_receive.is_some() || remove.contains(FieldsMember::CanPublish) || remove.contains(FieldsMember::CanReceive) {
+    } else if can_publish.is_some()
+        || can_receive.is_some()
+        || remove.contains(FieldsMember::CanPublish)
+        || remove.contains(FieldsMember::CanReceive)
+    {
         if let Some(channel) = get_user_voice_channel_in_server(&target_user.id, &server.id).await?
         {
             let node = get_channel_node(&channel).await?.unwrap();

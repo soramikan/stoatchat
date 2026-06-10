@@ -1,3 +1,4 @@
+use crate::routes::require_channel_server_not_frozen;
 use revolt_database::{
     util::{permissions::DatabasePermissionQuery, reference::Reference},
     Channel, Database, FieldsMessage, PartialMessage, SystemMessage, User, AMQP,
@@ -21,6 +22,7 @@ pub async fn message_unpin(
     msg: Reference<'_>,
 ) -> Result<EmptyResponse> {
     let channel = target.as_channel(db).await?;
+    require_channel_server_not_frozen(db, &channel).await?;
 
     if !matches!(channel, Channel::DirectMessage { .. }) {
         let mut query = DatabasePermissionQuery::new(db, &user).channel(&channel);

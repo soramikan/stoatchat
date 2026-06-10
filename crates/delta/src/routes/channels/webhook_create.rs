@@ -1,3 +1,4 @@
+use crate::routes::require_channel_server_not_frozen;
 use revolt_database::{
     util::{permissions::DatabasePermissionQuery, reference::Reference},
     Channel, Database, File, User, Webhook,
@@ -30,6 +31,7 @@ pub async fn create_webhook(
     })?;
 
     let channel = channel_id.as_channel(db).await?;
+    require_channel_server_not_frozen(db, &channel).await?;
 
     if !matches!(channel, Channel::TextChannel { .. } | Channel::Group { .. }) {
         return Err(create_error!(InvalidOperation));

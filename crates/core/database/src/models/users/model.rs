@@ -241,6 +241,49 @@ impl User {
         }
     }
 
+    /// Check whether this user is the bootstrap administrator.
+    pub async fn is_default_admin(&self, db: &Database) -> Result<bool> {
+        Ok(db
+            .fetch_first_user()
+            .await?
+            .is_some_and(|user| user.id == self.id))
+    }
+
+    /// Check whether this user has a global administration permission.
+    pub async fn has_admin_permission(&self, db: &Database, permission: &str) -> Result<bool> {
+        if self.is_default_admin(db).await? {
+            return Ok(true);
+        }
+
+        Ok(db
+            .fetch_admin_settings()
+            .await?
+            .unwrap_or_default()
+            .user_has_permission(&self.id, permission))
+    }
+
+    /// Require a global administration permission.
+    pub async fn require_admin_permission(&self, db: &Database, permission: &str) -> Result<()> {
+        if self.has_admin_permission(db, permission).await? {
+            Ok(())
+        } else {
+            Err(create_error!(MissingUserPermission {
+                permission: permission.to_string()
+            }))
+        }
+    }
+
+    /// Get limits for this user after applying administrator overrides.
+    pub async fn limits_with_admin_overrides(&self, db: &Database) -> Result<FeaturesLimits> {
+        let mut limits = self.limits().await;
+
+        if let Some(settings) = db.fetch_admin_settings().await? {
+            settings.apply_upload_limits(&self.id, &mut limits);
+        }
+
+        Ok(limits)
+    }
+
     /// Get the relationship with another user
     pub fn relationship_with(&self, user_b: &str) -> RelationshipStatus {
         if self.id == user_b {

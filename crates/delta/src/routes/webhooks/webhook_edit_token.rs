@@ -1,3 +1,4 @@
+use crate::routes::require_channel_server_not_frozen;
 use revolt_database::util::reference::Reference;
 use revolt_database::{Database, File, PartialWebhook};
 use revolt_models::v0::{DataEditWebhook, Webhook};
@@ -25,6 +26,8 @@ pub async fn webhook_edit_token(
 
     let mut webhook = webhook_id.as_webhook(db).await?;
     webhook.assert_token(&token)?;
+    let channel = db.fetch_channel(&webhook.channel_id).await?;
+    require_channel_server_not_frozen(db, &channel).await?;
 
     if data.name.is_none() && data.avatar.is_none() && data.remove.is_empty() {
         return Ok(Json(webhook.into()));

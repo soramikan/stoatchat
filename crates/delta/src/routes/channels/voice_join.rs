@@ -1,3 +1,4 @@
+use crate::routes::require_channel_server_not_frozen;
 use revolt_config::config;
 use revolt_database::{
     util::{permissions::perms, reference::Reference},
@@ -41,6 +42,7 @@ pub async fn call(
     }
 
     let channel = target.as_channel(db).await?;
+    require_channel_server_not_frozen(db, &channel).await?;
 
     let Some(voice_info) = channel.voice() else {
         return Err(create_error!(NotAVoiceChannel));

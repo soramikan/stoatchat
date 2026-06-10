@@ -1,3 +1,4 @@
+use crate::routes::require_server_not_frozen;
 use revolt_database::{util::reference::Reference, Channel, Database, Invite, Member, User, AMQP};
 use revolt_models::v0::{self, InviteJoinResponse};
 use revolt_result::{create_error, Result};
@@ -24,6 +25,8 @@ pub async fn join(
     match &invite {
         Invite::Server { server, .. } => {
             let server = db.fetch_server(server).await?;
+            require_server_not_frozen(db, &server.id).await?;
+
             let (_, channels) = Member::create(db, &server, &user, None).await?;
 
             Ok(Json(InviteJoinResponse::Server {

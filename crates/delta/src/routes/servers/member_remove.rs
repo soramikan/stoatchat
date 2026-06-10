@@ -1,3 +1,4 @@
+use crate::routes::require_server_not_frozen;
 use revolt_database::{
     util::{permissions::DatabasePermissionQuery, reference::Reference},
     voice::{
@@ -24,6 +25,7 @@ pub async fn kick(
     member_id: Reference<'_>,
 ) -> Result<EmptyResponse> {
     let server = server_id.as_server(db).await?;
+    require_server_not_frozen(db, &server.id).await?;
 
     if member_id.id == user.id {
         return Err(create_error!(CannotRemoveYourself));

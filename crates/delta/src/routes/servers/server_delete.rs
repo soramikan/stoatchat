@@ -1,3 +1,4 @@
+use crate::routes::require_server_not_frozen;
 use revolt_database::{
     util::reference::Reference,
     voice::{
@@ -28,6 +29,8 @@ pub async fn delete(
     let member = db.fetch_member(target.id, &user.id).await?;
 
     if server.owner == user.id {
+        require_server_not_frozen(db, &server.id).await?;
+
         for channel_id in &server.channels {
             delete_voice_channel(
                 voice_client,

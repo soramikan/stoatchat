@@ -1,3 +1,4 @@
+use crate::routes::require_channel_server_not_frozen;
 use revolt_database::{
     util::{permissions::DatabasePermissionQuery, reference::Reference},
     Database, File, PartialWebhook, User,
@@ -28,6 +29,7 @@ pub async fn webhook_edit(
 
     let mut webhook = webhook_id.as_webhook(db).await?;
     let channel = db.fetch_channel(&webhook.channel_id).await?;
+    require_channel_server_not_frozen(db, &channel).await?;
 
     let mut query = DatabasePermissionQuery::new(db, &user).channel(&channel);
     calculate_channel_permissions(&mut query)

@@ -1,4 +1,6 @@
 use iso8601_timestamp::Timestamp;
+
+use crate::routes::require_channel_server_not_frozen;
 use revolt_database::{
     tasks,
     util::{permissions::DatabasePermissionQuery, reference::Reference},
@@ -37,6 +39,8 @@ pub async fn edit(
 
     // Ensure we have permissions to send a message
     let channel = target.as_channel(db).await?;
+    require_channel_server_not_frozen(db, &channel).await?;
+
     let mut query = DatabasePermissionQuery::new(db, &user).channel(&channel);
     let permissions = calculate_channel_permissions(&mut query).await;
 

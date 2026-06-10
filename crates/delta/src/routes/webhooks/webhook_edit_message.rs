@@ -1,4 +1,6 @@
 use iso8601_timestamp::Timestamp;
+
+use crate::routes::require_channel_server_not_frozen;
 use revolt_config::config;
 use revolt_database::{
     tasks::process_embeds::queue, util::reference::Reference, Database, Message, PartialMessage,
@@ -35,6 +37,8 @@ pub async fn webhook_edit_message(
 
     let webhook = webhook_id.as_webhook(db).await?;
     webhook.assert_token(&token)?;
+    let channel = db.fetch_channel(&webhook.channel_id).await?;
+    require_channel_server_not_frozen(db, &channel).await?;
 
     let mut message = message_id.as_message(db).await?;
     if message.author != webhook.id {

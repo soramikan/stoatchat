@@ -1,3 +1,4 @@
+use crate::routes::require_server_not_frozen;
 use revolt_config::config;
 use revolt_database::{util::permissions::DatabasePermissionQuery, Database, Emoji, File, User};
 use revolt_models::v0;
@@ -31,6 +32,7 @@ pub async fn create_emoji(
     match &data.parent {
         v0::EmojiParent::Server { id } => {
             let server = db.fetch_server(id).await?;
+            require_server_not_frozen(db, &server.id).await?;
 
             // Check for permission
             let mut query = DatabasePermissionQuery::new(db, &user).server(&server);

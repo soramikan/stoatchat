@@ -1,5 +1,8 @@
+use crate::routes::require_server_not_frozen;
 use revolt_database::{
-    util::{permissions::DatabasePermissionQuery, reference::Reference}, voice::{sync_voice_permissions, VoiceClient}, Database, PartialServer, User
+    util::{permissions::DatabasePermissionQuery, reference::Reference},
+    voice::{sync_voice_permissions, VoiceClient},
+    Database, PartialServer, User,
 };
 use revolt_models::v0;
 use revolt_permissions::{
@@ -23,6 +26,8 @@ pub async fn set_default_server_permissions(
     let data = data.into_inner();
 
     let mut server = target.as_server(db).await?;
+    require_server_not_frozen(db, &server.id).await?;
+
     let mut query = DatabasePermissionQuery::new(db, &user).server(&server);
     let permissions = calculate_server_permissions(&mut query).await;
 
@@ -54,7 +59,7 @@ pub async fn set_default_server_permissions(
         let channel = Reference::from_unchecked(channel_id).as_channel(db).await?;
 
         sync_voice_permissions(db, voice_client, &channel, Some(&server), None).await?;
-    };
+    }
 
     Ok(Json(server.into()))
 }

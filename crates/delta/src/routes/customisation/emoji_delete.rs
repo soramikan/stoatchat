@@ -1,3 +1,4 @@
+use crate::routes::require_server_not_frozen;
 use revolt_database::{
     util::{permissions::DatabasePermissionQuery, reference::Reference},
     Database, EmojiParent, User,
@@ -22,6 +23,10 @@ pub async fn delete_emoji(
     let emoji = emoji_id.as_emoji(db).await?;
 
     // If we uploaded the emoji, then we have permission to delete it
+    if let EmojiParent::Server { id } = &emoji.parent {
+        require_server_not_frozen(db, id).await?;
+    }
+
     if emoji.creator_id != user.id {
         // Otherwise, validate we have permission to delete from parent
         match &emoji.parent {

@@ -1,5 +1,8 @@
+use crate::routes::require_channel_server_not_frozen;
 use revolt_database::{
-    util::{permissions::DatabasePermissionQuery, reference::Reference}, voice::{sync_voice_permissions, VoiceClient}, Database, User
+    util::{permissions::DatabasePermissionQuery, reference::Reference},
+    voice::{sync_voice_permissions, VoiceClient},
+    Database, User,
 };
 use revolt_models::v0;
 use revolt_permissions::{calculate_channel_permissions, ChannelPermission, Override};
@@ -22,8 +25,11 @@ pub async fn set_role_permissions(
     data: Json<v0::DataSetRolePermissions>,
 ) -> Result<Json<v0::Channel>> {
     let channel = target.as_channel(db).await?;
+    require_channel_server_not_frozen(db, &channel).await?;
+
     let mut query = DatabasePermissionQuery::new(db, &user).channel(&channel);
-    let permissions: revolt_permissions::PermissionValue = calculate_channel_permissions(&mut query).await;
+    let permissions: revolt_permissions::PermissionValue =
+        calculate_channel_permissions(&mut query).await;
 
     permissions.throw_if_lacking_channel_permission(ChannelPermission::ManagePermissions)?;
 
@@ -44,7 +50,8 @@ pub async fn set_role_permissions(
                 .set_role_permission(db, &role_id, data.permissions.clone().into())
                 .await?;
 
-            sync_voice_permissions(db, voice_client, &new_channel, Some(server), Some(&role_id)).await?;
+            sync_voice_permissions(db, voice_client, &new_channel, Some(server), Some(&role_id))
+                .await?;
 
             Ok(Json(new_channel.into()))
         } else {

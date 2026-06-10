@@ -1,3 +1,4 @@
+use crate::routes::require_server_not_frozen;
 use revolt_database::{
     util::{permissions::DatabasePermissionQuery, reference::Reference},
     voice::{sync_voice_permissions, VoiceClient},
@@ -30,6 +31,8 @@ pub async fn edit(
     })?;
 
     let mut server = target.as_server(db).await?;
+    require_server_not_frozen(db, &server.id).await?;
+
     let mut query = DatabasePermissionQuery::new(db, &user).server(&server);
     calculate_server_permissions(&mut query)
         .await

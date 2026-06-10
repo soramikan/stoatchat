@@ -1,3 +1,4 @@
+use crate::routes::require_server_not_frozen;
 use revolt_database::{
     util::{permissions::DatabasePermissionQuery, reference::Reference},
     voice::{sync_voice_permissions, VoiceClient},
@@ -24,6 +25,7 @@ pub async fn set_role_permission(
     let data = data.into_inner();
 
     let mut server = target.as_server(db).await?;
+    require_server_not_frozen(db, &server.id).await?;
 
     let (current_value, rank) = server
         .roles
@@ -55,7 +57,7 @@ pub async fn set_role_permission(
         let channel = Reference::from_unchecked(channel_id).as_channel(db).await?;
 
         sync_voice_permissions(db, voice_client, &channel, Some(&server), Some(&role_id)).await?;
-    };
+    }
 
     Ok(Json(server.into()))
 }

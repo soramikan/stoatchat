@@ -290,7 +290,7 @@ async fn upload_file(
     }
 
     // Get user's file upload limits
-    let limits = user.limits().await;
+    let limits = user.limits_with_admin_overrides(&db).await?;
     let size_limit = *limits
         .file_upload_size_limit
         .get(tag.clone().into())
@@ -440,7 +440,7 @@ async fn persist_named_temp_file(
         return Err(create_error!(FileTooSmall));
     }
 
-    let limits = user.limits().await;
+    let limits = user.limits_with_admin_overrides(db).await?;
     let size_limit = *limits
         .file_upload_size_limit
         .get(tag.clone().into())
@@ -577,6 +577,7 @@ async fn persist_named_temp_file(
     )
 )]
 async fn upload_chunk(
+    State(db): State<Database>,
     user: User,
     Path(tag): Path<Tag>,
     TypedMultipart(UploadChunkPayload {
@@ -590,7 +591,7 @@ async fn upload_chunk(
     let config = config().await;
     validate_chunk_metadata(chunk_index, total_chunks, total_size)?;
 
-    let limits = user.limits().await;
+    let limits = user.limits_with_admin_overrides(&db).await?;
     let size_limit = *limits
         .file_upload_size_limit
         .get(tag.into())

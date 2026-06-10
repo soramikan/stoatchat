@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use crate::routes::require_server_not_frozen;
 use authifier::models::{totp::Totp, Account, ValidatedTicket};
 use revolt_database::{
     util::{permissions::DatabasePermissionQuery, reference::Reference},
@@ -32,6 +33,8 @@ pub async fn edit(
     })?;
 
     let mut server = target.as_server(db).await?;
+    require_server_not_frozen(db, &server.id).await?;
+
     let mut query = DatabasePermissionQuery::new(db, &user).server(&server);
     let permissions = calculate_server_permissions(&mut query).await;
 

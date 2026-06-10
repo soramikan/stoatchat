@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::routes::require_channel_server_not_frozen;
 use redis_kiss::{get_connection, redis, AsyncCommands};
 use revolt_database::events::client::EventV1;
 use revolt_database::util::permissions::DatabasePermissionQuery;
@@ -38,6 +39,8 @@ pub async fn message_send(
 
     // Ensure we have permissions to send a message
     let channel = target.as_channel(db).await?;
+    require_channel_server_not_frozen(db, &channel).await?;
+
     let mut query = DatabasePermissionQuery::new(db, &user).channel(&channel);
     let permissions = calculate_channel_permissions(&mut query).await;
     permissions.throw_if_lacking_channel_permission(ChannelPermission::SendMessage)?;

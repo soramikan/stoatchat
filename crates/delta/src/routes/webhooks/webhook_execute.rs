@@ -1,3 +1,4 @@
+use crate::routes::require_channel_server_not_frozen;
 use revolt_config::config;
 use revolt_database::{
     util::{idempotency::IdempotencyKey, reference::Reference},
@@ -53,6 +54,7 @@ pub async fn webhook_execute(
     }
 
     let channel = db.fetch_channel(&webhook.channel_id).await?;
+    require_channel_server_not_frozen(db, &channel).await?;
 
     Ok(Json(
         Message::create_from_api(
