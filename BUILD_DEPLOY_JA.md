@@ -287,17 +287,24 @@ Apple Developer で用意するもの:
 - Developer ID Application 証明書、または配布方式に合う macOS signing identity
 - Notarization 用の Apple ID、App 用パスワード、Team ID
 
-Forge の macOS 署名は以下の環境変数で有効になります。
+Forge の macOS 署名は `stoat-desktop/.env` から環境変数を読み込んで有効になります。シェルで同名の環境変数を指定している場合は、シェル側の値が優先されます。
 
 ```sh
 cd stoat-desktop
-export MACOS_APP_BUNDLE_ID="dev.mikanbox.stoat.desktop"
-export MACOS_CODESIGN_IDENTITY="Developer ID Application: <名前> (<Team ID>)"
-export MACOS_PROVISIONING_PROFILE="/path/to/dev.mikanbox.stoat.desktop.provisionprofile"
-export APPLE_ID="<Apple ID>"
-export APPLE_APP_SPECIFIC_PASSWORD="<App-specific password>"
-export APPLE_TEAM_ID="<Apple Developer Team ID>"
+cp .env.example .env
+vi .env
 corepack pnpm make
+```
+
+`.env` の設定例:
+
+```dotenv
+MACOS_APP_BUNDLE_ID=dev.mikanbox.stoat.desktop
+MACOS_CODESIGN_IDENTITY=Developer ID Application: <名前> (<Team ID>)
+MACOS_PROVISIONING_PROFILE=/path/to/dev.mikanbox.stoat.desktop.provisionprofile
+APPLE_ID=<Apple ID>
+APPLE_APP_SPECIFIC_PASSWORD=<App-specific password>
+APPLE_TEAM_ID=<Apple Developer Team ID>
 ```
 
 `MACOS_CODESIGN_IDENTITY` または `MACOS_PROVISIONING_PROFILE` が設定されている場合、`stoat-desktop/build/entitlements.mac.plist` を使って署名します。Notarize 用の `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID` が揃っている場合は `@electron/notarize` も実行されます。
