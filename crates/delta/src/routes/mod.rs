@@ -4,7 +4,7 @@ use revolt_result::{create_error, Result};
 use revolt_rocket_okapi::{revolt_okapi::openapi3::OpenApi, settings::OpenApiSettings};
 pub use rocket::http::Status;
 pub use rocket::response::Redirect;
-use rocket::{Build, Rocket};
+use rocket::{Build, Rocket, Route};
 
 mod admin;
 mod bots;
@@ -45,55 +45,82 @@ pub(crate) async fn require_channel_server_not_frozen(
     Ok(())
 }
 
-pub fn mount(config: Settings, mut rocket: Rocket<Build>) -> Rocket<Build> {
-    let settings = OpenApiSettings::default();
+type RouteDocs = (Vec<Route>, OpenApi);
 
-    if config.features.webhooks_enabled {
-        mount_endpoints_and_merged_docs! {
-            rocket, "/".to_owned(), settings,
-            "/" => (vec![], custom_openapi_spec()),
-            "/admin" => admin::routes(),
-            "" => openapi_get_routes_spec![root::root],
-            "/users" => users::routes(),
-            "/bots" => bots::routes(),
-            "/channels" => channels::routes(),
-            "/servers" => servers::routes(),
-            "/invites" => invites::routes(),
-            "/custom" => customisation::routes(),
-            "/safety" => safety::routes(),
-            "/auth/account" => rocket_authifier::routes::account::routes(),
-            "/auth/session" => rocket_authifier::routes::session::routes(),
-            "/auth/mfa" => rocket_authifier::routes::mfa::routes(),
-            "/onboard" => onboard::routes(),
-            "/policy" => policy::routes(),
-            "/push" => push::routes(),
-            "/sync" => sync::routes(),
-            "/webhooks" => webhooks::routes()
-        };
-    } else {
-        mount_endpoints_and_merged_docs! {
-            rocket, "/".to_owned(), settings,
-            "/" => (vec![], custom_openapi_spec()),
-            "/admin" => admin::routes(),
-            "" => openapi_get_routes_spec![root::root],
-            "/users" => users::routes(),
-            "/bots" => bots::routes(),
-            "/channels" => channels::routes(),
-            "/servers" => servers::routes(),
-            "/invites" => invites::routes(),
-            "/custom" => customisation::routes(),
-            "/safety" => safety::routes(),
-            "/auth/account" => rocket_authifier::routes::account::routes(),
-            "/auth/session" => rocket_authifier::routes::session::routes(),
-            "/auth/mfa" => rocket_authifier::routes::mfa::routes(),
-            "/onboard" => onboard::routes(),
-            "/policy" => policy::routes(),
-            "/push" => push::routes(),
-            "/sync" => sync::routes()
-        };
+pub fn mount(config: Settings, rocket: Rocket<Build>) -> Rocket<Build> {
+    let settings = OpenApiSettings::default();
+    let route_docs = route_docs(config.features.webhooks_enabled);
+
+    mount_route_docs(rocket, "/".to_owned(), &settings, route_docs)
+}
+
+fn route_docs(webhooks_enabled: bool) -> Vec<(&'static str, RouteDocs)> {
+    let mut route_docs = vec![
+        ("/", (vec![], custom_openapi_spec())),
+        ("/admin", admin::routes()),
+        ("", openapi_get_routes_spec![root::root]),
+        ("/users", users::routes()),
+        ("/bots", bots::routes()),
+        ("/channels", channels::routes()),
+        ("/servers", servers::routes()),
+        ("/invites", invites::routes()),
+        ("/custom", customisation::routes()),
+        ("/safety", safety::routes()),
+        ("/auth/account", rocket_authifier::routes::account::routes()),
+        ("/auth/session", rocket_authifier::routes::session::routes()),
+        ("/auth/mfa", rocket_authifier::routes::mfa::routes()),
+        ("/onboard", onboard::routes()),
+        ("/policy", policy::routes()),
+        ("/push", push::routes()),
+        ("/sync", sync::routes()),
+    ];
+
+    if webhooks_enabled {
+        route_docs.push(("/webhooks", webhooks::routes()));
     }
 
-    rocket
+    route_docs
+        .into_iter()
+        .map(|(path, docs)| (path, normalize_openapi_version(docs)))
+        .collect()
+}
+
+fn normalize_openapi_version((routes, mut spec): RouteDocs) -> RouteDocs {
+    spec.openapi = OpenApi::default_version();
+    (routes, spec)
+}
+
+fn mount_route_docs(
+    mut rocket: Rocket<Build>,
+    base_path: String,
+    settings: &OpenApiSettings,
+    route_docs: Vec<(&'static str, RouteDocs)>,
+) -> Rocket<Build> {
+    assert!(
+        base_path == "/" || !base_path.ends_with('/'),
+        "`base_path` should not end with an `/`."
+    );
+
+    let mut openapi_list = Vec::new();
+
+    for (path, (routes, openapi)) in route_docs {
+        rocket = rocket.mount(format!("{}{}", base_path, path), routes);
+        openapi_list.push((path, openapi));
+    }
+
+    let openapi_docs =
+        match revolt_rocket_okapi::revolt_okapi::merge::marge_spec_list(&openapi_list) {
+            Ok(docs) => docs,
+            Err(err) => panic!("Could not merge OpenAPI spec: {}", err),
+        };
+
+    rocket.mount(
+        base_path,
+        vec![revolt_rocket_okapi::get_openapi_route(
+            openapi_docs,
+            settings,
+        )],
+    )
 }
 
 fn custom_openapi_spec() -> OpenApi {
@@ -353,5 +380,41 @@ fn custom_openapi_spec() -> OpenApi {
             },
         ],
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use revolt_rocket_okapi::revolt_okapi::merge::marge_spec_list;
+
+    fn assert_route_docs_merge(webhooks_enabled: bool) {
+        let expected_version = OpenApi::default_version();
+        let route_docs = route_docs(webhooks_enabled);
+
+        for (path, (_, spec)) in &route_docs {
+            assert_eq!(
+                spec.openapi, expected_version,
+                "OpenAPI version mismatch before merge for route group {path}"
+            );
+        }
+
+        let openapi_list: Vec<_> = route_docs
+            .into_iter()
+            .map(|(path, (_, spec))| (path, spec))
+            .collect();
+
+        let merged = marge_spec_list(&openapi_list).expect("OpenAPI route specs should merge");
+        assert_eq!(merged.openapi, expected_version);
+    }
+
+    #[test]
+    fn route_docs_merge_without_webhooks() {
+        assert_route_docs_merge(false);
+    }
+
+    #[test]
+    fn route_docs_merge_with_webhooks() {
+        assert_route_docs_merge(true);
     }
 }
