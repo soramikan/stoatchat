@@ -68,7 +68,7 @@ lettre = "0.10.0-alpha.4"
 
 # HTTP Requests
 reqwest = "0.13.2"
-isahc = "1.7"
+isahc = { version = "1.7", features = ["static-ssl"] }
 
 # Notifications
 fcm_v1 = "0.3.0"
