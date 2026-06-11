@@ -89,6 +89,16 @@ impl Default for AdminSettings {
 }
 
 impl AdminSettings {
+    fn admin_permissions() -> &'static [&'static str] {
+        &[
+            ADMIN_PERMISSION_CREATE_SERVERS,
+            ADMIN_PERMISSION_MANAGE_ADMIN,
+            ADMIN_PERMISSION_MANAGE_SERVERS,
+            ADMIN_PERMISSION_MANAGE_UPLOAD_LIMITS,
+            ADMIN_PERMISSION_MANAGE_USERS,
+        ]
+    }
+
     pub fn user_permissions(&self, user_id: &str) -> HashSet<String> {
         let mut permissions = HashSet::new();
 
@@ -107,6 +117,20 @@ impl AdminSettings {
 
     pub fn user_has_permission(&self, user_id: &str, permission: &str) -> bool {
         self.user_permissions(user_id).contains(permission)
+    }
+
+    pub fn user_has_any_admin_permission(&self, user_id: &str) -> bool {
+        let permissions = self.user_permissions(user_id);
+
+        Self::admin_permissions()
+            .iter()
+            .any(|permission| permissions.contains(*permission))
+    }
+
+    pub fn has_any_admin_account(&self) -> bool {
+        self.users
+            .keys()
+            .any(|user_id| self.user_has_any_admin_permission(user_id))
     }
 
     pub fn can_create_server(&self, user_id: &str) -> bool {

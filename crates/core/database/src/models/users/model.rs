@@ -1,6 +1,6 @@
 use std::{collections::HashSet, str::FromStr, time::Duration};
 
-use crate::{events::client::EventV1, Database, File, RatelimitEvent, AMQP};
+use crate::{events::client::EventV1, AdminSettings, Database, File, RatelimitEvent, AMQP};
 
 use authifier::config::{EmailVerificationConfig, Template};
 use futures::future::join_all;
@@ -243,23 +243,57 @@ impl User {
 
     /// Check whether this user is the bootstrap administrator.
     pub async fn is_default_admin(&self, db: &Database) -> Result<bool> {
-        Ok(db
-            .fetch_first_user()
+        Ok(Self::bootstrap_admin_id(db)
             .await?
-            .is_some_and(|user| user.id == self.id))
+            .is_some_and(|user_id| user_id == self.id))
+    }
+
+    pub async fn bootstrap_admin_id(db: &Database) -> Result<Option<String>> {
+        let settings = db.fetch_admin_settings().await?.unwrap_or_default();
+        let config = config().await;
+        Self::resolve_bootstrap_admin_id(
+            db,
+            &settings,
+            Some(config.features.bootstrap_admin_id.as_str()),
+        )
+        .await
+    }
+
+    async fn resolve_bootstrap_admin_id(
+        db: &Database,
+        settings: &AdminSettings,
+        configured_admin_id: Option<&str>,
+    ) -> Result<Option<String>> {
+        if settings.has_any_admin_account() {
+            return Ok(None);
+        }
+
+        if let Some(configured_admin_id) = configured_admin_id
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        {
+            return Ok(Some(configured_admin_id.to_string()));
+        }
+
+        Ok(db.fetch_first_user().await?.map(|user| user.id))
     }
 
     /// Check whether this user has a global administration permission.
     pub async fn has_admin_permission(&self, db: &Database, permission: &str) -> Result<bool> {
-        if self.is_default_admin(db).await? {
+        let settings = db.fetch_admin_settings().await?.unwrap_or_default();
+        let config = config().await;
+        let bootstrap_admin_id = Self::resolve_bootstrap_admin_id(
+            db,
+            &settings,
+            Some(config.features.bootstrap_admin_id.as_str()),
+        )
+        .await?;
+
+        if bootstrap_admin_id.is_some_and(|user_id| user_id == self.id) {
             return Ok(true);
         }
 
-        Ok(db
-            .fetch_admin_settings()
-            .await?
-            .unwrap_or_default()
-            .user_has_permission(&self.id, permission))
+        Ok(settings.user_has_permission(&self.id, permission))
     }
 
     /// Require a global administration permission.
@@ -884,7 +918,7 @@ impl User {
 
 #[cfg(test)]
 mod tests {
-    use crate::User;
+    use crate::{AdminSettings, AdminUserOverride, User, ADMIN_PERMISSION_MANAGE_USERS};
 
     #[test]
     fn username_validation_blocked_names() {
@@ -984,6 +1018,82 @@ mod tests {
                 .await;
 
             assert!(updated_invalid_update_result.is_err());
+        });
+    }
+
+    #[async_std::test]
+    async fn bootstrap_admin_defaults_to_oldest_user_when_no_admin_exists() {
+        database_test!(|db| async move {
+            let first = User::create(&db, "First".to_string(), None, None)
+                .await
+                .unwrap();
+            let second = User::create(&db, "Second".to_string(), None, None)
+                .await
+                .unwrap();
+            let settings = AdminSettings::default();
+
+            let bootstrap_admin_id = User::resolve_bootstrap_admin_id(&db, &settings, None)
+                .await
+                .unwrap();
+
+            assert_eq!(bootstrap_admin_id.as_deref(), Some(first.id.as_str()));
+            assert!(first.is_default_admin(&db).await.unwrap());
+            assert!(!second.is_default_admin(&db).await.unwrap());
+        });
+    }
+
+    #[async_std::test]
+    async fn bootstrap_admin_uses_configured_user_when_no_admin_exists() {
+        database_test!(|db| async move {
+            let first = User::create(&db, "First".to_string(), None, None)
+                .await
+                .unwrap();
+            let second = User::create(&db, "Second".to_string(), None, None)
+                .await
+                .unwrap();
+            let settings = AdminSettings::default();
+
+            let bootstrap_admin_id =
+                User::resolve_bootstrap_admin_id(&db, &settings, Some(second.id.as_str()))
+                    .await
+                    .unwrap();
+
+            assert_eq!(bootstrap_admin_id.as_deref(), Some(second.id.as_str()));
+            assert_ne!(bootstrap_admin_id.as_deref(), Some(first.id.as_str()));
+        });
+    }
+
+    #[async_std::test]
+    async fn bootstrap_admin_is_disabled_when_explicit_admin_exists() {
+        database_test!(|db| async move {
+            let first = User::create(&db, "First".to_string(), None, None)
+                .await
+                .unwrap();
+            let second = User::create(&db, "Second".to_string(), None, None)
+                .await
+                .unwrap();
+            let mut settings = AdminSettings::default();
+            settings.users.insert(
+                second.id.clone(),
+                AdminUserOverride {
+                    roles: Vec::new(),
+                    permissions: vec![ADMIN_PERMISSION_MANAGE_USERS.to_string()],
+                    upload_limits: Default::default(),
+                },
+            );
+            db.upsert_admin_settings(&settings).await.unwrap();
+
+            let bootstrap_admin_id =
+                User::resolve_bootstrap_admin_id(&db, &settings, Some(first.id.as_str()))
+                    .await
+                    .unwrap();
+
+            assert_eq!(bootstrap_admin_id, None);
+            assert!(!first.is_default_admin(&db).await.unwrap());
+            assert!(second
+                .has_admin_permission(&db, ADMIN_PERMISSION_MANAGE_USERS)
+                .await
+                .unwrap());
         });
     }
 }

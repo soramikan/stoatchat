@@ -166,13 +166,13 @@ async fn list_users(db: &State<Database>, user: User) -> Result<Json<Vec<AdminUs
         .await?;
 
     let settings = db.fetch_admin_settings().await?.unwrap_or_default();
-    let first_user_id = db.fetch_first_user().await?.map(|user| user.id);
+    let bootstrap_admin_id = User::bootstrap_admin_id(db).await?;
     let users = db
         .fetch_all_users()
         .await?
         .into_iter()
         .map(|listed_user| {
-            let default_admin = first_user_id.as_ref() == Some(&listed_user.id);
+            let default_admin = bootstrap_admin_id.as_ref() == Some(&listed_user.id);
             let mut permissions = if default_admin {
                 vec![
                     ADMIN_PERMISSION_CREATE_SERVERS.to_string(),

@@ -219,6 +219,9 @@ webhooks_enabled = false
 mass_mentions_send_notifications = true
 # Can role/everyone pings be used at all
 mass_mentions_enabled = true
+# User ID to use as the bootstrap administrator while no admin account exists.
+# Leave empty to use the oldest account.
+bootstrap_admin_id = ""
 
 [features.limits]
 

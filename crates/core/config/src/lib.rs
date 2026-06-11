@@ -438,6 +438,8 @@ pub struct Features {
     pub webhooks_enabled: bool,
     pub mass_mentions_send_notifications: bool,
     pub mass_mentions_enabled: bool,
+    #[serde(default)]
+    pub bootstrap_admin_id: String,
 
     #[serde(default)]
     pub advanced: FeaturesAdvanced,
