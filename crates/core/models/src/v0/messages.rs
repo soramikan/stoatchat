@@ -226,6 +226,9 @@ auto_derived!(
     #[derive(Default)]
     #[cfg_attr(feature = "validator", derive(Validate))]
     pub struct SendableEmbed {
+        /// Discord embed type. Only `rich` is accepted when provided.
+        #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+        pub embed_type: Option<String>,
         #[cfg_attr(feature = "validator", validate(length(min = 1, max = 2048)))]
         pub icon_url: Option<String>,
         #[cfg_attr(feature = "validator", validate(length(min = 1, max = 2048)))]
@@ -430,6 +433,14 @@ const DISCORD_EMBED_COLOR_MAX: u32 = 0x00ff_ffff;
 impl SendableEmbed {
     /// Validate Discord-compatible embed field limits.
     pub fn validate_discord_limits(&self) -> std::result::Result<(), &'static str> {
+        if self
+            .embed_type
+            .as_deref()
+            .is_some_and(|embed_type| embed_type != "rich")
+        {
+            return Err("type must be rich");
+        }
+
         check_optional_len(self.title.as_deref(), DISCORD_EMBED_TITLE_LIMIT, "title")?;
         check_optional_len(
             self.description.as_deref(),
@@ -726,6 +737,7 @@ mod tests {
     #[test]
     fn validates_discord_embed_limits() {
         let embed = SendableEmbed {
+            embed_type: Some("rich".to_string()),
             title: Some("Build complete".to_string()),
             description: Some("a".repeat(4096)),
             color: Some(0x57f287),
@@ -773,6 +785,13 @@ mod tests {
         };
 
         assert!(bad_color.validate_discord_limits().is_err());
+
+        let bad_type = SendableEmbed {
+            embed_type: Some("image".to_string()),
+            ..Default::default()
+        };
+
+        assert!(bad_type.validate_discord_limits().is_err());
     }
 
     #[test]
