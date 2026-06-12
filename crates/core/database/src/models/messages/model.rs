@@ -740,12 +740,22 @@ impl Message {
                 error: error.to_string()
             })
         })?;
+        embed.validate_discord_limits().map_err(|error| {
+            create_error!(FailedValidation {
+                error: error.to_string()
+            })
+        })?;
 
-        let media = if let Some(id) = embed.media {
-            Some(File::use_attachment(db, &id, &self.id, &self.author).await?)
+        let media = if let Some(id) = &embed.media {
+            Some(File::use_attachment(db, id, &self.id, &self.author).await?)
         } else {
             None
         };
+
+        let colour = embed
+            .colour
+            .clone()
+            .or_else(|| embed.color.map(|color| format!("#{color:06x}")));
 
         Ok(Embed::Text(Text {
             icon_url: embed.icon_url,
@@ -753,7 +763,14 @@ impl Message {
             title: embed.title,
             description: embed.description,
             media: media.map(|m| m.into()),
-            colour: embed.colour,
+            colour,
+            color: embed.color,
+            author: embed.author,
+            footer: embed.footer,
+            fields: embed.fields,
+            image: embed.image,
+            thumbnail: embed.thumbnail,
+            timestamp: embed.timestamp,
         }))
     }
 
@@ -911,24 +928,7 @@ impl Message {
         db: &Database,
         embed: v0::SendableEmbed,
     ) -> Result<()> {
-        let media: Option<v0::File> = if let Some(id) = embed.media {
-            Some(
-                File::use_attachment(db, &id, &self.id, &self.author)
-                    .await?
-                    .into(),
-            )
-        } else {
-            None
-        };
-
-        let embed = v0::Embed::Text(v0::Text {
-            icon_url: embed.icon_url,
-            url: embed.url,
-            title: embed.title,
-            description: embed.description,
-            media,
-            colour: embed.colour,
-        });
+        let embed = self.create_embed(db, embed).await?;
 
         if let Some(embeds) = &mut self.embeds {
             embeds.push(embed);
@@ -979,22 +979,13 @@ impl Message {
         embeds: &[SendableEmbed],
         max_length: usize,
     ) -> Result<()> {
-        let mut running_total = 0;
         if let Some(content) = content {
-            running_total += content.len();
-        }
-
-        for embed in embeds {
-            if let Some(desc) = &embed.description {
-                running_total += desc.len();
+            if content.len() > max_length {
+                return Err(create_error!(PayloadTooLarge));
             }
         }
 
-        if running_total <= max_length {
-            Ok(())
-        } else {
-            Err(create_error!(PayloadTooLarge))
-        }
+        v0::validate_embed_text_total(embeds).map_err(|_| create_error!(PayloadTooLarge))
     }
 
     /// Delete a message

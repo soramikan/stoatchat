@@ -11,7 +11,10 @@ use rocket::{FromForm, FromFormField};
 
 use iso8601_timestamp::Timestamp;
 
-use super::{Channel, Embed, File, Member, MessageWebhook, User, Webhook, RE_COLOUR};
+use super::{
+    Channel, Embed, EmbedAsset, EmbedAuthor, EmbedField, EmbedFooter, File, Member, MessageWebhook,
+    User, Webhook, RE_COLOUR,
+};
 
 auto_derived_partial!(
     /// Message
@@ -223,13 +226,13 @@ auto_derived!(
     #[derive(Default)]
     #[cfg_attr(feature = "validator", derive(Validate))]
     pub struct SendableEmbed {
-        #[cfg_attr(feature = "validator", validate(length(min = 1, max = 256)))]
+        #[cfg_attr(feature = "validator", validate(length(min = 1, max = 2048)))]
         pub icon_url: Option<String>,
-        #[cfg_attr(feature = "validator", validate(length(min = 1, max = 256)))]
+        #[cfg_attr(feature = "validator", validate(length(min = 1, max = 2048)))]
         pub url: Option<String>,
-        #[cfg_attr(feature = "validator", validate(length(min = 1, max = 100)))]
+        #[cfg_attr(feature = "validator", validate(length(min = 1, max = 256)))]
         pub title: Option<String>,
-        #[cfg_attr(feature = "validator", validate(length(min = 1, max = 2000)))]
+        #[cfg_attr(feature = "validator", validate(length(min = 1, max = 4096)))]
         pub description: Option<String>,
         pub media: Option<String>,
         #[cfg_attr(
@@ -237,6 +240,23 @@ auto_derived!(
             validate(length(min = 1, max = 128), regex = "RE_COLOUR")
         )]
         pub colour: Option<String>,
+        /// Discord embed colour as a 24-bit RGB integer.
+        ///
+        /// If `colour` is not provided, this is converted to a CSS hex colour
+        /// for older clients.
+        pub color: Option<u32>,
+        /// Discord-compatible embed author
+        pub author: Option<EmbedAuthor>,
+        /// Discord-compatible embed footer
+        pub footer: Option<EmbedFooter>,
+        /// Discord-compatible embed fields
+        pub fields: Option<Vec<EmbedField>>,
+        /// Discord-compatible large image
+        pub image: Option<EmbedAsset>,
+        /// Discord-compatible thumbnail image
+        pub thumbnail: Option<EmbedAsset>,
+        /// Discord-compatible ISO8601 timestamp
+        pub timestamp: Option<Timestamp>,
     }
 
     /// What this message should reply to and how
@@ -267,9 +287,11 @@ auto_derived!(
         pub attachments: Option<Vec<String>>,
         /// Messages to reply to
         pub replies: Option<Vec<ReplyIntent>>,
-        /// Embeds to include in message
+        /// Embeds to include in message.
         ///
-        /// Text embed content contributes to the content length cap
+        /// This accepts the existing Stoat text embed fields and Discord-style
+        /// embed fields such as `author`, `footer`, `fields`, `image`,
+        /// `thumbnail`, `timestamp`, and `color`.
         #[cfg_attr(feature = "validator", validate)]
         pub embeds: Option<Vec<SendableEmbed>>,
         /// Masquerade to apply to this message
@@ -389,6 +411,160 @@ auto_derived!(
         Pinned,
     }
 );
+
+const DISCORD_EMBED_TOTAL_TEXT_LIMIT: usize = 6000;
+const DISCORD_EMBED_FIELD_LIMIT: usize = 25;
+const DISCORD_EMBED_TITLE_LIMIT: usize = 256;
+const DISCORD_EMBED_DESCRIPTION_LIMIT: usize = 4096;
+const DISCORD_EMBED_FIELD_NAME_LIMIT: usize = 256;
+const DISCORD_EMBED_FIELD_VALUE_LIMIT: usize = 1024;
+const DISCORD_EMBED_FOOTER_TEXT_LIMIT: usize = 2048;
+const DISCORD_EMBED_AUTHOR_NAME_LIMIT: usize = 256;
+const DISCORD_EMBED_URL_LIMIT: usize = 2048;
+const DISCORD_EMBED_COLOR_MAX: u32 = 0x00ff_ffff;
+
+impl SendableEmbed {
+    /// Validate Discord-compatible embed field limits.
+    pub fn validate_discord_limits(&self) -> std::result::Result<(), &'static str> {
+        check_optional_len(self.title.as_deref(), DISCORD_EMBED_TITLE_LIMIT, "title")?;
+        check_optional_len(
+            self.description.as_deref(),
+            DISCORD_EMBED_DESCRIPTION_LIMIT,
+            "description",
+        )?;
+        check_optional_len(self.url.as_deref(), DISCORD_EMBED_URL_LIMIT, "url")?;
+        check_optional_len(
+            self.icon_url.as_deref(),
+            DISCORD_EMBED_URL_LIMIT,
+            "icon_url",
+        )?;
+
+        if self
+            .color
+            .is_some_and(|color| color > DISCORD_EMBED_COLOR_MAX)
+        {
+            return Err("color must be between 0 and 16777215");
+        }
+
+        if let Some(author) = &self.author {
+            check_len(&author.name, DISCORD_EMBED_AUTHOR_NAME_LIMIT, "author.name")?;
+            check_optional_len(author.url.as_deref(), DISCORD_EMBED_URL_LIMIT, "author.url")?;
+            check_optional_len(
+                author.icon_url.as_deref(),
+                DISCORD_EMBED_URL_LIMIT,
+                "author.icon_url",
+            )?;
+        }
+
+        if let Some(footer) = &self.footer {
+            check_len(&footer.text, DISCORD_EMBED_FOOTER_TEXT_LIMIT, "footer.text")?;
+            check_optional_len(
+                footer.icon_url.as_deref(),
+                DISCORD_EMBED_URL_LIMIT,
+                "footer.icon_url",
+            )?;
+        }
+
+        check_asset(self.image.as_ref(), "image.url")?;
+        check_asset(self.thumbnail.as_ref(), "thumbnail.url")?;
+
+        if let Some(fields) = &self.fields {
+            if fields.len() > DISCORD_EMBED_FIELD_LIMIT {
+                return Err("fields must contain at most 25 items");
+            }
+
+            for field in fields {
+                check_len(&field.name, DISCORD_EMBED_FIELD_NAME_LIMIT, "fields.name")?;
+                check_len(
+                    &field.value,
+                    DISCORD_EMBED_FIELD_VALUE_LIMIT,
+                    "fields.value",
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Count text-bearing Discord embed fields.
+    pub fn text_length(&self) -> usize {
+        let mut total = 0;
+
+        if let Some(title) = &self.title {
+            total += title.chars().count();
+        }
+
+        if let Some(description) = &self.description {
+            total += description.chars().count();
+        }
+
+        if let Some(author) = &self.author {
+            total += author.name.chars().count();
+        }
+
+        if let Some(footer) = &self.footer {
+            total += footer.text.chars().count();
+        }
+
+        if let Some(fields) = &self.fields {
+            for field in fields {
+                total += field.name.chars().count();
+                total += field.value.chars().count();
+            }
+        }
+
+        total
+    }
+}
+
+fn check_asset(
+    asset: Option<&EmbedAsset>,
+    field: &'static str,
+) -> std::result::Result<(), &'static str> {
+    if let Some(asset) = asset {
+        check_len(&asset.url, DISCORD_EMBED_URL_LIMIT, field)?;
+    }
+
+    Ok(())
+}
+
+fn check_optional_len(
+    value: Option<&str>,
+    max: usize,
+    field: &'static str,
+) -> std::result::Result<(), &'static str> {
+    if let Some(value) = value {
+        check_len(value, max, field)?;
+    }
+
+    Ok(())
+}
+
+fn check_len(
+    value: &str,
+    max: usize,
+    field: &'static str,
+) -> std::result::Result<(), &'static str> {
+    let len = value.chars().count();
+
+    if len == 0 || len > max {
+        Err(field)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn validate_embed_text_total(
+    embeds: &[SendableEmbed],
+) -> std::result::Result<(), &'static str> {
+    let total: usize = embeds.iter().map(SendableEmbed::text_length).sum();
+
+    if total > DISCORD_EMBED_TOTAL_TEXT_LIMIT {
+        Err("embed text must contain at most 6000 characters")
+    } else {
+        Ok(())
+    }
+}
 
 /// Message Author Abstraction
 #[derive(Clone)]
@@ -522,5 +698,69 @@ impl PushNotification {
             message: msg,
             channel,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validates_discord_embed_limits() {
+        let embed = SendableEmbed {
+            title: Some("Build complete".to_string()),
+            description: Some("a".repeat(4096)),
+            color: Some(0x57f287),
+            fields: Some(vec![EmbedField {
+                name: "Commit".to_string(),
+                value: "`f100c42f`".to_string(),
+                inline: true,
+            }]),
+            ..Default::default()
+        };
+
+        assert!(embed.validate_discord_limits().is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_discord_embed_limits() {
+        let too_many_fields = SendableEmbed {
+            fields: Some(
+                (0..26)
+                    .map(|idx| EmbedField {
+                        name: format!("Field {idx}"),
+                        value: "value".to_string(),
+                        inline: false,
+                    })
+                    .collect(),
+            ),
+            ..Default::default()
+        };
+
+        assert!(too_many_fields.validate_discord_limits().is_err());
+
+        let bad_color = SendableEmbed {
+            color: Some(0x01_000000),
+            ..Default::default()
+        };
+
+        assert!(bad_color.validate_discord_limits().is_err());
+    }
+
+    #[test]
+    fn validates_discord_embed_total_text_length() {
+        let embeds = vec![SendableEmbed {
+            description: Some("a".repeat(6000)),
+            ..Default::default()
+        }];
+
+        assert!(validate_embed_text_total(&embeds).is_ok());
+
+        let embeds = vec![SendableEmbed {
+            description: Some("a".repeat(6001)),
+            ..Default::default()
+        }];
+
+        assert!(validate_embed_text_total(&embeds).is_err());
     }
 }

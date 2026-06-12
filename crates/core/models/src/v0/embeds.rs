@@ -1,3 +1,5 @@
+use iso8601_timestamp::Timestamp;
+
 use super::File;
 
 auto_derived!(
@@ -130,6 +132,59 @@ auto_derived!(
         pub colour: Option<String>,
     }
 
+    /// Discord-compatible embed media asset
+    pub struct EmbedAsset {
+        /// Source URL
+        pub url: String,
+        /// Proxied URL, if available
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub proxy_url: Option<String>,
+        /// Width of the media, if known
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub width: Option<usize>,
+        /// Height of the media, if known
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub height: Option<usize>,
+    }
+
+    /// Discord-compatible embed footer
+    pub struct EmbedFooter {
+        /// Footer text
+        pub text: String,
+        /// URL to footer icon
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub icon_url: Option<String>,
+        /// Proxied URL to footer icon, if available
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub proxy_icon_url: Option<String>,
+    }
+
+    /// Discord-compatible embed author
+    pub struct EmbedAuthor {
+        /// Author name
+        pub name: String,
+        /// URL for author name
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub url: Option<String>,
+        /// URL to author icon
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub icon_url: Option<String>,
+        /// Proxied URL to author icon, if available
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub proxy_icon_url: Option<String>,
+    }
+
+    /// Discord-compatible embed field
+    pub struct EmbedField {
+        /// Field name
+        pub name: String,
+        /// Field value
+        pub value: String,
+        /// Whether the field should be displayed inline
+        #[serde(default, skip_serializing_if = "crate::if_false")]
+        pub inline: bool,
+    }
+
     /// Text Embed
     pub struct Text {
         /// URL to icon
@@ -150,6 +205,27 @@ auto_derived!(
         /// CSS Colour
         #[serde(skip_serializing_if = "Option::is_none")]
         pub colour: Option<String>,
+        /// Discord embed colour as a 24-bit RGB integer
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub color: Option<u32>,
+        /// Discord-compatible embed author
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub author: Option<EmbedAuthor>,
+        /// Discord-compatible embed footer
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub footer: Option<EmbedFooter>,
+        /// Discord-compatible embed fields
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub fields: Option<Vec<EmbedField>>,
+        /// Discord-compatible large image
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub image: Option<EmbedAsset>,
+        /// Discord-compatible thumbnail image
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub thumbnail: Option<EmbedAsset>,
+        /// Discord-compatible ISO8601 timestamp
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub timestamp: Option<Timestamp>,
     }
 
     /// Embed
