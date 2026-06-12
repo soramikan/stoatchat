@@ -185,6 +185,16 @@ auto_derived!(
         pub inline: bool,
     }
 
+    /// Discord-compatible embed provider
+    pub struct EmbedProvider {
+        /// Provider name
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub name: Option<String>,
+        /// Provider URL
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub url: Option<String>,
+    }
+
     /// Text Embed
     pub struct Text {
         /// URL to icon
@@ -223,6 +233,12 @@ auto_derived!(
         /// Discord-compatible thumbnail image
         #[serde(skip_serializing_if = "Option::is_none")]
         pub thumbnail: Option<EmbedAsset>,
+        /// Discord-compatible embedded video
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub video: Option<EmbedAsset>,
+        /// Discord-compatible embed provider
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub provider: Option<EmbedProvider>,
         /// Discord-compatible ISO8601 timestamp
         #[serde(skip_serializing_if = "Option::is_none")]
         pub timestamp: Option<Timestamp>,

@@ -770,6 +770,8 @@ impl Message {
             fields: embed.fields,
             image: embed.image,
             thumbnail: embed.thumbnail,
+            video: embed.video,
+            provider: embed.provider,
             timestamp: embed.timestamp,
         }))
     }

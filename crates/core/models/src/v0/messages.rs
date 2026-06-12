@@ -12,8 +12,8 @@ use rocket::{FromForm, FromFormField};
 use iso8601_timestamp::Timestamp;
 
 use super::{
-    Channel, Embed, EmbedAsset, EmbedAuthor, EmbedField, EmbedFooter, File, Member, MessageWebhook,
-    User, Webhook, RE_COLOUR,
+    Channel, Embed, EmbedAsset, EmbedAuthor, EmbedField, EmbedFooter, EmbedProvider, File, Member,
+    MessageWebhook, User, Webhook, RE_COLOUR,
 };
 
 auto_derived_partial!(
@@ -255,6 +255,10 @@ auto_derived!(
         pub image: Option<EmbedAsset>,
         /// Discord-compatible thumbnail image
         pub thumbnail: Option<EmbedAsset>,
+        /// Discord-compatible embedded video
+        pub video: Option<EmbedAsset>,
+        /// Discord-compatible embed provider
+        pub provider: Option<EmbedProvider>,
         /// Discord-compatible ISO8601 timestamp
         pub timestamp: Option<Timestamp>,
     }
@@ -291,7 +295,7 @@ auto_derived!(
         ///
         /// This accepts the existing Stoat text embed fields and Discord-style
         /// embed fields such as `author`, `footer`, `fields`, `image`,
-        /// `thumbnail`, `timestamp`, and `color`.
+        /// `thumbnail`, `video`, `provider`, `timestamp`, and `color`.
         #[cfg_attr(feature = "validator", validate)]
         pub embeds: Option<Vec<SendableEmbed>>,
         /// Masquerade to apply to this message
@@ -467,6 +471,20 @@ impl SendableEmbed {
 
         check_asset(self.image.as_ref(), "image.url")?;
         check_asset(self.thumbnail.as_ref(), "thumbnail.url")?;
+        check_asset(self.video.as_ref(), "video.url")?;
+
+        if let Some(provider) = &self.provider {
+            check_optional_len(
+                provider.name.as_deref(),
+                DISCORD_EMBED_TITLE_LIMIT,
+                "provider.name",
+            )?;
+            check_optional_len(
+                provider.url.as_deref(),
+                DISCORD_EMBED_URL_LIMIT,
+                "provider.url",
+            )?;
+        }
 
         if let Some(fields) = &self.fields {
             if fields.len() > DISCORD_EMBED_FIELD_LIMIT {
@@ -711,6 +729,16 @@ mod tests {
             title: Some("Build complete".to_string()),
             description: Some("a".repeat(4096)),
             color: Some(0x57f287),
+            provider: Some(EmbedProvider {
+                name: Some("CI Dashboard".to_string()),
+                url: Some("https://example.com".to_string()),
+            }),
+            video: Some(EmbedAsset {
+                url: "https://example.com/demo.mp4".to_string(),
+                proxy_url: None,
+                width: Some(1280),
+                height: Some(720),
+            }),
             fields: Some(vec![EmbedField {
                 name: "Commit".to_string(),
                 value: "`f100c42f`".to_string(),
